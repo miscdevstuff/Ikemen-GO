@@ -1,0 +1,19 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+}
+
+plugins {
+    id("com.facebook.react.settings")
+}
+
+extensions.configure<com.facebook.react.ReactSettingsExtension> {
+    autolinkLibrariesFromCommand()
+}
+
+rootProject.name = "IkemenMobile"
+include(":app")
