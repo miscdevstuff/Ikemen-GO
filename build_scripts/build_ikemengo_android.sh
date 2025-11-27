@@ -1,38 +1,384 @@
 #!/bin/bash
-set -e
+# Android build script for Ikemen GO core (shared lib for JNI)
+# - Cross-builds FFmpeg, libxmp, SDL2 with NDK
+# - Links them + gl4es into libikemen.so
+# - Outputs to app_android/android/app/src/main/jniLibs/<ABI>
 
-NDK_VER="27.1.12297006"
-if [ -z "$ANDROID_NDK_HOME" ]; then
-	export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VER"
-fi
+set -euo pipefail
 
-API_LEVEL=24
-ARCH=aarch64
-ABI=arm64-v8a
-TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
-JNI_DIR="$(pwd)/app_android/android/app/src/main/jniLibs/$ABI"
+# --------------------------------------------------------------------
+# Basic config
+# --------------------------------------------------------------------
+NDK_VER_DEFAULT="27.1.12297006"
+
+# You can override from the environment, eg:
+#   ANDROID_ABI=arm64-v8a ANDROID_API=24 bash build_scripts/build_ikemengo_android.sh
+ANDROID_ABI="${ANDROID_ABI:-arm64-v8a}"
+ANDROID_API="${ANDROID_API:-24}"
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$REPO_ROOT"
+
+case "$ANDROID_ABI" in
+	arm64-v8a)
+		ANDROID_ARCH="aarch64"
+		ANDROID_TRIPLE="aarch64-linux-android"
+		GOARCH_ANDROID="arm64"
+		;;
+	armeabi-v7a)
+		ANDROID_ARCH="arm"
+		ANDROID_TRIPLE="armv7a-linux-androideabi"
+		GOARCH_ANDROID="arm"
+		;;
+	*)
+		echo "ERROR: Unsupported ANDROID_ABI='$ANDROID_ABI' (supported: arm64-v8a, armeabi-v7a)" >&2
+		exit 1
+		;;
+esac
+
+# Where we install Android-built dependencies
+ANDROID_PREFIX_ROOT="$REPO_ROOT/build/android/$ANDROID_ABI"
+FFMPEG_PREFIX="$ANDROID_PREFIX_ROOT/ffmpeg"
+LIBXMP_PREFIX="$ANDROID_PREFIX_ROOT/libxmp"
+SDL2_PREFIX="$ANDROID_PREFIX_ROOT/sdl2"
+
+# Where the final .so goes (for Gradle / APK)
+JNI_DIR="$REPO_ROOT/app_android/android/app/src/main/jniLibs/$ANDROID_ABI"
 mkdir -p "$JNI_DIR"
 
-echo "=== Building Ikemen GO Core ==="
+APP_VERSION="${APP_VERSION:-android-dev}"
+APP_BUILDTIME="${APP_BUILDTIME:-$(date '+%Y.%m.%d')}"
 
-# Setup Cross-Compiler
-export CC="$TOOLCHAIN/bin/${ARCH}-linux-android${API_LEVEL}-clang"
-export CXX="$TOOLCHAIN/bin/${ARCH}-linux-android${API_LEVEL}-clang++"
-export CGO_ENABLED=1
-export GOOS=android
-export GOARCH=arm64
+echo "=== Ikemen GO Android build ==="
+echo "  ABI        : $ANDROID_ABI"
+echo "  API Level  : $ANDROID_API"
+echo "  Triple     : $ANDROID_TRIPLE"
+echo "  Prefix root: $ANDROID_PREFIX_ROOT"
+echo "  JNI dir    : $JNI_DIR"
 
-# Link against dependencies
-export CGO_CFLAGS="-I$(pwd)/external/gl4es/include -I$(pwd)/external/glu/include -DANDROID -O3"
-export CGO_LDFLAGS="-L$JNI_DIR -lGL_es4 -lGLU -landroid -llog"
+# --------------------------------------------------------------------
+# Helper: ensure basic host tools
+# --------------------------------------------------------------------
+ensure_host_deps() {
+	local missing=()
+	need() { command -v "$1" > /dev/null 2>&1 || missing+=("$1"); }
 
-# Build Shared Library
-go build -tags android \
-	-buildmode=c-shared \
-	-trimpath \
-	-ldflags="-s -w -X 'main.Version=Android-CI'" \
-	-o "$JNI_DIR/libikemen.so" \
-	./src
+	need git
+	need pkg-config
+	need autoconf
+	need automake
+	need libtool
+	need make
+	need nasm
+	need yasm
+	need go
 
-echo "Success: libikemen.so created."
-ls -lh "$JNI_DIR"
+	if ((${#missing[@]})); then
+		echo "ERROR: Missing host tools: ${missing[*]}" >&2
+		echo "Install on Debian/Ubuntu (example):" >&2
+		echo '  sudo apt update && sudo apt install -y \' >&2
+		echo "    git pkg-config autoconf automake libtool make nasm yasm golang" >&2
+		exit 1
+	fi
+}
+
+# --------------------------------------------------------------------
+# NDK / toolchain
+# --------------------------------------------------------------------
+setup_ndk() {
+	if [[ -z ${ANDROID_NDK_HOME:-} ]]; then
+		if [[ -n ${ANDROID_HOME:-} && -d "$ANDROID_HOME/ndk/$NDK_VER_DEFAULT" ]]; then
+			export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VER_DEFAULT"
+		elif [[ -n ${ANDROID_HOME:-} && -d "$ANDROID_HOME/ndk" ]]; then
+			# fallback: first NDK found
+			export ANDROID_NDK_HOME="$(find "$ANDROID_HOME/ndk" -maxdepth 1 -mindepth 1 -type d | head -n1)"
+		fi
+	fi
+
+	if [[ -z ${ANDROID_NDK_HOME:-} || ! -d $ANDROID_NDK_HOME ]]; then
+		echo "ERROR: ANDROID_NDK_HOME not set or invalid. Set ANDROID_NDK_HOME or ANDROID_HOME with NDK installed." >&2
+		exit 1
+	fi
+
+	ANDROID_TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+	if [[ ! -d $ANDROID_TOOLCHAIN ]]; then
+		echo "ERROR: NDK LLVM toolchain not found at: $ANDROID_TOOLCHAIN" >&2
+		exit 1
+	fi
+
+	export ANDROID_NDK_HOME
+	export ANDROID_TOOLCHAIN
+	export ANDROID_SYSROOT="$ANDROID_TOOLCHAIN/sysroot"
+
+	# Compiler / binutils
+	export CC="$ANDROID_TOOLCHAIN/bin/${ANDROID_TRIPLE}${ANDROID_API}-clang"
+	export CXX="$ANDROID_TOOLCHAIN/bin/${ANDROID_TRIPLE}${ANDROID_API}-clang++"
+	export AR="$ANDROID_TOOLCHAIN/bin/llvm-ar"
+	export RANLIB="$ANDROID_TOOLCHAIN/bin/llvm-ranlib"
+	export STRIP="$ANDROID_TOOLCHAIN/bin/llvm-strip"
+
+	# Ensure toolchain bin comes first
+	export PATH="$ANDROID_TOOLCHAIN/bin:$PATH"
+
+	# Shims for tools some configure scripts expect
+	local strip_shim="$ANDROID_TOOLCHAIN/bin/${ANDROID_TRIPLE}-strip"
+	if [[ ! -x $strip_shim ]]; then
+		cat > "$strip_shim" << EOF
+#!/bin/sh
+exec "$ANDROID_TOOLCHAIN/bin/llvm-strip" "\$@"
+EOF
+		chmod +x "$strip_shim"
+	fi
+
+	local nm_shim="$ANDROID_TOOLCHAIN/bin/${ANDROID_TRIPLE}-nm"
+	if [[ ! -x $nm_shim ]]; then
+		cat > "$nm_shim" << EOF
+#!/bin/sh
+exec "$ANDROID_TOOLCHAIN/bin/llvm-nm" "\$@"
+EOF
+		chmod +x "$nm_shim"
+	fi
+
+	local pc_shim="$ANDROID_TOOLCHAIN/bin/${ANDROID_TRIPLE}-pkg-config"
+	if [[ ! -x $pc_shim ]]; then
+		cat > "$pc_shim" << 'EOF'
+#!/bin/sh
+exec pkg-config "$@"
+EOF
+		chmod +x "$pc_shim"
+	fi
+
+	echo "Using NDK: $ANDROID_NDK_HOME"
+	echo "Toolchain: $ANDROID_TOOLCHAIN"
+}
+
+# --------------------------------------------------------------------
+# FFmpeg build (minimal feature set, Android)
+# --------------------------------------------------------------------
+build_ffmpeg_android() {
+	local FFMPEG_REV="release/7.1"
+	local srcdir="$REPO_ROOT/build/ffmpeg-src-android-$ANDROID_ABI"
+
+	echo "==> Building FFmpeg for Android (prefix=$FFMPEG_PREFIX)"
+	rm -rf "$srcdir"
+	mkdir -p "$(dirname "$srcdir")"
+	git clone https://github.com/FFmpeg/FFmpeg.git "$srcdir"
+	pushd "$srcdir" > /dev/null
+	git checkout "$FFMPEG_REV"
+
+	local cfg=(
+		"--prefix=$FFMPEG_PREFIX"
+		"--enable-cross-compile"
+		"--target-os=android"
+		"--arch=$ANDROID_ARCH"
+		"--cross-prefix=${ANDROID_TRIPLE}-"
+		"--cc=$CC"
+		"--cxx=$CXX"
+		"--ar=$AR"
+		"--ranlib=$RANLIB"
+		"--strip=${ANDROID_TRIPLE}-strip"
+		"--sysroot=$ANDROID_SYSROOT"
+
+		"--enable-shared" "--disable-static"
+		"--disable-programs"
+		"--disable-doc"
+		"--disable-debug"
+		"--disable-everything"
+		"--disable-autodetect"
+
+		"--enable-avformat"
+		"--enable-avcodec"
+		"--enable-avutil"
+		"--enable-swresample"
+		"--enable-swscale"
+		"--enable-avfilter"
+
+		"--enable-protocol=file"
+		"--enable-demuxer=matroska,webm"
+		"--enable-decoder=vp8,vp9,opus,vorbis"
+		"--enable-parser=vp8,vp9,opus,vorbis"
+
+		"--extra-cflags=-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include"
+		"--extra-ldflags=-L$ANDROID_SYSROOT/usr/lib/$ANDROID_TRIPLE/$ANDROID_API"
+	)
+
+	./configure "${cfg[@]}"
+	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
+	make install
+
+	echo "==> FFmpeg installed to: $FFMPEG_PREFIX"
+	ls -R "$FFMPEG_PREFIX" || true
+	popd > /dev/null
+}
+
+# --------------------------------------------------------------------
+# libxmp build (module music)
+# --------------------------------------------------------------------
+build_libxmp_android() {
+	local srcdir="$REPO_ROOT/build/libxmp-src-android-$ANDROID_ABI"
+
+	echo "==> Building libxmp for Android (prefix=$LIBXMP_PREFIX)"
+	rm -rf "$srcdir"
+	mkdir -p "$(dirname "$srcdir")"
+	git clone https://github.com/cmatsuoka/libxmp.git "$srcdir"
+	pushd "$srcdir" > /dev/null
+
+	autoreconf -fi || true
+
+	./configure \
+		--host="$ANDROID_TRIPLE" \
+		--prefix="$LIBXMP_PREFIX" \
+		--enable-shared \
+		--disable-static \
+		CC="$CC" \
+		AR="$AR" \
+		RANLIB="$RANLIB" \
+		CFLAGS="-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include"
+
+	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
+	make install
+
+	echo "==> libxmp installed to: $LIBXMP_PREFIX"
+	ls -R "$LIBXMP_PREFIX" || true
+	popd > /dev/null
+}
+
+# --------------------------------------------------------------------
+# SDL2 build (for go-sdl2 on Android)
+# --------------------------------------------------------------------
+build_sdl2_android() {
+	local srcdir="$REPO_ROOT/build/sdl2-src-android-$ANDROID_ABI"
+
+	echo "==> Building SDL2 for Android (prefix=$SDL2_PREFIX)"
+	rm -rf "$srcdir"
+	mkdir -p "$(dirname "$srcdir")"
+	git clone https://github.com/libsdl-org/SDL.git "$srcdir"
+	pushd "$srcdir" > /dev/null
+
+	# IMPORTANT: use SDL2, not SDL3 (default branch)
+	# Pick a stable 2.30.x tag that still has configure/ac
+	git checkout release-2.30.10 || git checkout release-2.30.9 || git checkout SDL2 || true
+
+	# If autogen.sh exists, run it to generate configure
+	if [[ -f "./autogen.sh" ]]; then
+		./autogen.sh
+	fi
+
+	if [[ ! -f "./configure" ]]; then
+		echo "ERROR: SDL2 configure script not found even after autogen. Check SDL version/tag." >&2
+		exit 1
+	fi
+
+	LIBS="-llog -landroid" \
+		./configure \
+		--host="$ANDROID_TRIPLE" \
+		--prefix="$SDL2_PREFIX" \
+		--enable-shared \
+		--disable-static \
+		--disable-audio \
+		--disable-video-opengl \
+		--disable-hidapi \
+		CC="$CC" \
+		AR="$AR" \
+		RANLIB="$RANLIB" \
+		CFLAGS="-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include"
+
+	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
+	make install
+
+	echo "==> SDL2 installed to: $SDL2_PREFIX"
+	ls -R "$SDL2_PREFIX" || true
+	popd > /dev/null
+}
+
+# --------------------------------------------------------------------
+# Bundle native shared libs into jniLibs
+# --------------------------------------------------------------------
+bundle_shared_libs_into_jni() {
+	echo "==> Copying FFmpeg/libxmp/SDL2 .so to $JNI_DIR"
+	mkdir -p "$JNI_DIR"
+
+	if [[ -d "$FFMPEG_PREFIX/lib" ]]; then
+		cp -av "$FFMPEG_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
+	fi
+	if [[ -d "$LIBXMP_PREFIX/lib" ]]; then
+		cp -av "$LIBXMP_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
+	fi
+	if [[ -d "$SDL2_PREFIX/lib" ]]; then
+		cp -av "$SDL2_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
+	fi
+
+	# gl4es (built by build_gl4es.sh) should already have produced libGL_es4.so here
+	if [[ -f "$JNI_DIR/libGL_es4.so" ]]; then
+		echo "gl4es: found $JNI_DIR/libGL_es4.so"
+	else
+		echo "WARNING: libGL_es4.so not found in $JNI_DIR"
+		echo "         Run: bash build_scripts/build_gl4es.sh"
+	fi
+
+	ls -lh "$JNI_DIR" || true
+}
+
+# --------------------------------------------------------------------
+# Build Ikemen core as libikemen.so
+# --------------------------------------------------------------------
+build_ikemen_android() {
+	echo "=== Building Ikemen core (Go → c-shared) ==="
+
+	# 1) Cross-build deps
+	build_ffmpeg_android
+	build_libxmp_android
+	build_sdl2_android
+
+	# 2) Make Android-built libs visible to pkg-config
+	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$LIBXMP_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+	local pc="${PKG_CONFIG:-pkg-config}"
+
+	# Flags for FFmpeg + libxmp + SDL2 (same idea as build/build.sh)
+	local deps_cflags
+	local deps_libs
+	deps_cflags="$($pc --cflags libavformat libavcodec libavutil libswscale libswresample libavfilter libxmp sdl2)"
+	deps_libs="$($pc --libs libavformat libavcodec libavutil libswscale libswresample libavfilter libxmp sdl2)"
+
+	# 3) Go / CGO setup
+	export GOOS=android
+	export GOARCH="$GOARCH_ANDROID"
+	export CGO_ENABLED=1
+	export GOEXPERIMENT=arenas
+
+	# C flags: deps + gl4es headers + Android
+	export CGO_CFLAGS="${deps_cflags} -I$REPO_ROOT/external/gl4es/include -DANDROID -fPIC"
+
+	# Linker flags: deps + gl4es + Android libs
+	export CGO_LDFLAGS="${deps_libs} -L$JNI_DIR -lGL_es4 -landroid -llog"
+
+	# pkg-config for go-gl -> gl4es
+	export PKG_CONFIG_PATH="$JNI_DIR/gl4es/lib/pkgconfig"
+
+	# 4) Build as c-shared for JNI
+	local out_so="$JNI_DIR/libikemen.so"
+	go build -tags android \
+		-buildmode=c-shared \
+		-trimpath \
+		-ldflags="-s -w -X 'main.Version=${APP_VERSION}' -X 'main.BuildTime=${APP_BUILDTIME}'" \
+		-o "$out_so" \
+		./src
+
+	echo "==> Built: $out_so"
+}
+
+# --------------------------------------------------------------------
+# main
+# --------------------------------------------------------------------
+main() {
+	ensure_host_deps
+	setup_ndk
+
+	build_ikemen_android
+	bundle_shared_libs_into_jni
+
+	echo "=== Android core build complete ==="
+	echo "  JNI libs in: $JNI_DIR"
+}
+
+main "$@"
