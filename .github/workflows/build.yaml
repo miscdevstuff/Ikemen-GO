@@ -31,6 +31,11 @@ jobs:
           cache: "npm"
           cache-dependency-path: app_android/package-lock.json
 
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install build-essential pkg-config autoconf automake libtool libtool-bin nasm yasm git make golang
+
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
         with:
