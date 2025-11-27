@@ -50,7 +50,7 @@ func closeLog(f *os.File) {
 	f.Close()
 }
 
-func main() {
+func RunGame() {
 
 	exePath, err := os.Executable()
 	if err != nil {
@@ -135,6 +135,14 @@ func main() {
 			panic(err)
 		}
 	}
+}
+
+func main() {
+    // If we are on Desktop (Windows/Linux/Mac), run immediately.
+    // If we are on Android, DO NOTHING. The Java side will call 'run()' manually.
+    if runtime.GOOS != "android" {
+        RunGame()
+    }
 }
 
 // Loops through given comand line arguments and processes them for later use by the game
