@@ -53,9 +53,6 @@ jobs:
       - name: Build gl4es
         run: bash build_scripts/build_gl4es.sh
 
-      - name: Build GLU
-        run: bash build_scripts/build_glu.sh
-
       - name: Build Ikemen GO Shared Lib
         run: bash build_scripts/build_ikemengo_android.sh
 
