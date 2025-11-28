@@ -2,12 +2,16 @@
 
 package main
 
+/*
+#include <jni.h>
+*/
 import "C"
 
+// Java signature: public static native void runIkemen();
+
 //export Java_com_ikemenmobile_MainActivity_runIkemen
-func Java_com_ikemenmobile_MainActivity_runIkemen(env *C.void, clazz *C.void) {
-    // We run the game loop in a new goroutine to avoid blocking the JNI thread permanently
-    // (though for a game loop, blocking might be intended depending on the threading model, 
-    // usually SDL handles its own thread).
-    go RunGame()
+func Java_com_ikemenmobile_MainActivity_runIkemen(env *C.JNIEnv, clazz C.jclass) {
+	// We ignore env and clazz for now: all game logic is internal to Ikemen GO.
+	// Just start the engine. You already made main() skip RunGame() on Android.
+	go RunGame()
 }

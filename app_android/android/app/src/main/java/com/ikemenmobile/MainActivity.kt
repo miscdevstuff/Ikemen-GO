@@ -1,22 +1,35 @@
 package com.ikemenmobile
 
-import com.facebook.react.ReactActivity
-import com.facebook.react.ReactActivityDelegate
-import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
-import com.facebook.react.defaults.DefaultReactActivityDelegate
+import android.os.Bundle
+import android.view.View
+import android.widget.FrameLayout
+import androidx.activity.ComponentActivity
 
-class MainActivity : ReactActivity() {
+class MainActivity : ComponentActivity() {
 
-  /**
-   * Returns the name of the main component registered from JavaScript. This is used to schedule
-   * rendering of the component.
-   */
-  override fun getMainComponentName(): String = "IkemenMobile"
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-  /**
-   * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
-   * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
-   */
-  override fun createReactActivityDelegate(): ReactActivityDelegate =
-      DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+        // Simple blank container so the Activity is valid.
+        val root = FrameLayout(this).apply {
+            id = View.generateViewId()
+        }
+        setContentView(root)
+
+        // Decide where Ikemen should use as its "base" path.
+        // For now, something under app's private storage:
+        val basePath = getExternalFilesDir(null)?.absolutePath
+            ?: filesDir.absolutePath
+
+        // Start Ikemen on a background thread so we don't block the UI thread.
+        Thread {
+            try {
+                IkemenNative.runIkemen(basePath)
+            } catch (t: Throwable) {
+                t.printStackTrace()
+                // You can also log to Logcat if you want:
+                // Log.e("IkemenNative", "Ikemen crashed", t)
+            }
+        }.start()
+    }
 }
