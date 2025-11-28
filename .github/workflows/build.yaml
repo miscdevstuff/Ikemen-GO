@@ -64,7 +64,8 @@ jobs:
         working-directory: ./app_android/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          #./gradlew assembleDebug --no-daemon
+          ./gradlew app:processDebugResources --stacktrace --info
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
