@@ -417,7 +417,8 @@ func (s *System) init(w, h int32) *lua.LState {
 	// PS: The "\x00" is what is know as Null Terminator.
 
 	// Now we proceed to init the render.
-	if s.cfg.Video.RenderMode == "Vulkan 1.3" {
+	// For now disable all and panic
+	/* if s.cfg.Video.RenderMode == "Vulkan 1.3" {
 		gfx = &Renderer_VK{}
 		gfxFont = &FontRenderer_VK{}
 	} else if s.cfg.Video.RenderMode == "OpenGL 2.1" {
@@ -426,7 +427,10 @@ func (s *System) init(w, h int32) *lua.LState {
 	} else {
 		gfx = &Renderer_GL32{}
 		//gfxFont = &glfont.FontRenderer_GL32{}
-	}
+	} */
+	// For now just panic
+	gfx = nil
+	gfxFont = nil
 	gfx.Init()
 	gfxFont.Init()
 	gfx.BeginFrame(false)

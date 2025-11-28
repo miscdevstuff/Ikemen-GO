@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	"strings"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -23,7 +24,14 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	var window *sdl.Window
 
 	// Initialize SDL
-	chk(sdl.Init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK | sdl.INIT_EVENTS | sdl.INIT_GAMECONTROLLER | sdl.INIT_HAPTIC | sdl.INIT_TIMER))
+	chk(sdl.Init(
+		sdl.INIT_VIDEO |
+			sdl.INIT_JOYSTICK |
+			sdl.INIT_EVENTS |
+			sdl.INIT_GAMECONTROLLER |
+			sdl.INIT_HAPTIC |
+			sdl.INIT_TIMER,
+	))
 
 	mode, err := sdl.GetDesktopDisplayMode(0)
 	if err != nil {
@@ -41,18 +49,17 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	}
 	var x, y = (mode.W - w2) / 2, (mode.H - h2) / 2
 
-	window.SetResizable(true)
-	var windowFlags sdl.WindowFlags = sdl.WINDOW_INPUT_FOCUS
+	var windowFlags uint32 = sdl.WINDOW_INPUT_FOCUS
 
 	if sys.cfg.Video.RenderMode == "OpenGL 3.2" {
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_CORE) // only GL 3.2 needs this
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 3)
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 2)
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, 1)
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_CORE)
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 3)
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 2)
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, 1)
 		windowFlags |= sdl.WINDOW_OPENGL
 	} else if sys.cfg.Video.RenderMode == "OpenGL 2.1" {
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 2)
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 1)
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 2)
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 1)
 		windowFlags |= sdl.WINDOW_OPENGL
 	} else {
 		windowFlags |= sdl.WINDOW_VULKAN
@@ -69,8 +76,7 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	// NOTE: Borderless fullscreen is in reality just a window without borders.
 	if fullscreen {
 		if !s.cfg.Video.Borderless {
-			// Equivalent to true GLFW fullscreen (exclusive mode: using monitor object)
-			// This is necessary for proper video mode changes.
+			// Real fullscreen
 			windowFlags |= sdl.WINDOW_FULLSCREEN
 			windowFlags |= sdl.WINDOW_RESIZABLE
 		} else {
@@ -81,7 +87,19 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		windowFlags |= sdl.WINDOW_RESIZABLE
 		windowFlags |= sdl.WINDOW_SHOWN
 	}
-	window, err = sdl.CreateWindow(s.cfg.Config.WindowTitle, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, w2, h2, windowFlags)
+
+	title := s.cfg.Config.WindowTitle
+	if title == "" {
+		title = "Ikemen GO"
+	}
+
+	window, err = sdl.CreateWindow(
+		title,
+		sdl.WINDOWPOS_CENTERED,
+		sdl.WINDOWPOS_CENTERED,
+		w2, h2,
+		windowFlags,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create window: %w", err)
 	}
@@ -105,16 +123,27 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	if sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1" {
 		// V-Sync
 		if s.cfg.Video.VSync >= 0 {
-			sdl.GLSetSwapInterval(s.cfg.Video.VSync)
+			_ = sdl.GLSetSwapInterval(s.cfg.Video.VSync)
 		}
 	}
 
 	for i := range input.controllers {
-		input.controllerstate[i] = &ControllerState{Buttons: make(map[sdl.GameControllerButton]byte)}
+		input.controllerstate[i] = &ControllerState{
+			Buttons: make(map[sdl.GameControllerButton]byte),
+		}
 	}
 
-	ret := &Window{window, s.cfg.Config.WindowTitle, int(x), int(y), w, h, fullscreen, false}
-	return ret, err
+	ret := &Window{
+		Window:     window,
+		title:      title,
+		x:          int(x),
+		y:          int(y),
+		w:          w,
+		h:          h,
+		fullscreen: fullscreen,
+		closeflag:  false,
+	}
+	return ret, nil
 }
 
 func (w *Window) SwapBuffers() {
@@ -148,13 +177,11 @@ func (w *Window) imageToSurface(img image.Image) (*sdl.Surface, error) {
 		return nil, err
 	}
 
-	// 4. Lock the surface, copy data, and unlock
 	if err := surface.Lock(); err != nil {
 		surface.Free()
 		return nil, err
 	}
 
-	// Copy the pixel data from the Go image (rgba.Pix) to the SDL surface (surface.Pixels())
 	copy(surface.Pixels(), rgba.Pix)
 
 	surface.Unlock()
@@ -169,7 +196,7 @@ func (w *Window) SetIcon(icon []image.Image) {
 
 func (w *Window) SetSwapInterval(interval int) {
 	if sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1" {
-		sdl.GLSetSwapInterval(interval)
+		_ = sdl.GLSetSwapInterval(interval)
 	} else {
 		gfx.SetVSync()
 	}
@@ -248,8 +275,9 @@ func (w *Window) toggleFullscreen() {
 		}
 		sdl.ShowCursor(sdl.DISABLE)
 	}
-	if sys.cfg.Video.VSync != -1 && (sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1") {
-		sdl.GLSetSwapInterval(sys.cfg.Video.VSync)
+	if sys.cfg.Video.VSync != -1 &&
+		(sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1") {
+		_ = sdl.GLSetSwapInterval(sys.cfg.Video.VSync)
 	}
 	w.fullscreen = !w.fullscreen
 }
@@ -265,45 +293,48 @@ func convertI16toI8(val int16) (converted int8) {
 }
 
 func (w *Window) pollEvents() {
-	const MAX_VALUE float32 = 32768.0
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 		switch t := event.(type) {
-		case sdl.ControllerAxisEvent:
+		case *sdl.ControllerAxisEvent:
 			input.controllerstate[t.Which].Axes[t.Axis] = convertI16toI8(t.Value)
-			// fmt.Printf("system_sdl.go : Axis: %v, Value: %v\n", t.Axis, t.Value)
-		case sdl.ControllerButtonEvent:
-			input.controllerstate[t.Which].Buttons[t.Button] = byte(t.State)
-			// fmt.Printf("system_sdl.go : Button: %v, State: %v\n", t.Button, t.State)
-		case sdl.QuitEvent:
+		case *sdl.ControllerButtonEvent:
+			input.controllerstate[t.Which].Buttons[sdl.GameControllerButton(t.Button)] = byte(t.State)
+		case *sdl.QuitEvent:
 			w.closeflag = true
-		case sdl.KeyboardEvent:
-			// fmt.Printf("DEBUG: sdl.KeyboardEvent: Sym: %v, Mod: %v", t.Keysym.Sym, t.Keysym.Mod)
+		case *sdl.KeyboardEvent:
+			mod := sdl.Keymod(t.Keysym.Mod)
 			if t.State == sdl.PRESSED {
-				OnKeyPressed(t.Keysym.Sym, t.Keysym.Mod)
+				OnKeyPressed(t.Keysym.Sym, mod)
 			} else if t.State == sdl.RELEASED {
-				OnKeyReleased(t.Keysym.Sym, t.Keysym.Mod)
+				OnKeyReleased(t.Keysym.Sym, mod)
 			}
-		case sdl.WindowEvent:
+		case *sdl.WindowEvent:
 			if t.Event == sdl.WINDOWEVENT_EXPOSED {
 				if sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1" {
 					gfx.EndFrame()
 					w.SwapBuffers()
 				}
 			} else if t.Event == sdl.WINDOWEVENT_CLOSE {
-				// This is the equivalent of setting ShouldClose to true
 				w.closeflag = true
 			}
-		case sdl.TextInputEvent:
-			if len(t.Text) > 0 {
-				OnTextEntered(t.Text)
+		case *sdl.TextInputEvent:
+			// Text is [32]byte, convert and trim trailing NULs
+			text := strings.TrimRight(string(t.Text[:]), "\x00")
+			if len(text) > 0 {
+				OnTextEntered(text)
 			}
-		case sdl.JoyDeviceAddedEvent:
+		case *sdl.JoyDeviceAddedEvent:
 			joyS := int(t.Which)
 			input.controllers[joyS] = sdl.GameControllerOpen(joyS)
-			input.controllerstate[joyS].HasRumble = input.controllers[joyS].HasRumble()
-		case sdl.JoyDeviceRemovedEvent:
+			if input.controllers[joyS] != nil {
+				// go-sdl2 v0.4.10 no longer has (*GameController).HasRumble()
+				// If you want rumble later, you’ll need to wire it via haptics.
+				input.controllerstate[joyS].HasRumble = false
+			}
+		case *sdl.JoyDeviceRemovedEvent:
 			if controller := input.controllers[int(t.Which)]; controller != nil {
 				controller.Close()
+				input.controllers[int(t.Which)] = nil
 			}
 		}
 	}

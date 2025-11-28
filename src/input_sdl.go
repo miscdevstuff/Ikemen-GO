@@ -301,7 +301,7 @@ func (input *Input) GetJoystickPath(joy int) string {
 	if joy < 0 || joy >= len(input.controllers) {
 		return ""
 	}
-	return input.controllers[joy].Path()
+	return input.controllers[joy].Name()
 }
 
 func (input *Input) GetJoystickGUID(joy int) string {
