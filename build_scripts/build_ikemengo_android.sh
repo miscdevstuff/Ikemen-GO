@@ -288,6 +288,12 @@ build_sdl2_android() {
 
 	echo "==> SDL2 installed to: $SDL2_PREFIX"
 	ls -R "$SDL2_PREFIX" || true
+	
+	# Ensure libSDL2.so exists (pkg-config uses -lSDL2)
+    if [[ -f "$SDL2_PREFIX/lib/libSDL2-2.0.so" && ! -f "$SDL2_PREFIX/lib/libSDL2.so" ]]; then
+        ( cd "$SDL2_PREFIX/lib" && ln -s libSDL2-2.0.so libSDL2.so )
+    fi
+
 	popd > /dev/null
 }
 
@@ -333,7 +339,7 @@ build_ikemen_android() {
 	# 2) Make Android-built libs visible to pkg-config
 	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$LIBXMP_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 	# pkg-config for go-gl -> gl4es
-	export PKG_CONFIG_PATH="$JNI_DIR/gl4es/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+	export PKG_CONFIG_PATH="$ANDROID_PREFIX_ROOT/gl4es/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 	local pc="${PKG_CONFIG:-pkg-config}"
 
 	# Flags for FFmpeg + libxmp + SDL2 (same idea as build/build.sh)
@@ -375,6 +381,9 @@ main() {
 
 	build_ikemen_android
 	bundle_shared_libs_into_jni
+
+	# Remove headers from jnilibs
+	find $JNI_DIR -name '*.h' -delete
 
 	echo "=== Android core build complete ==="
 	echo "  JNI libs in: $JNI_DIR"
