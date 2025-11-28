@@ -100,12 +100,12 @@ android {
         }
     }
 
-    // LINKING C++ (We will create this file in Phase 3)
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-        }
-    }
+    // LINKING C++
+    //externalNativeBuild {
+    //    cmake {
+    //        path = file("src/main/cpp/CMakeLists.txt")
+    //    }
+    //}
 }
 
 dependencies {
