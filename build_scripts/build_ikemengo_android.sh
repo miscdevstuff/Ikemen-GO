@@ -289,7 +289,7 @@ build_sdl2_android() {
 
 	# if libSDL2.so doesnt exist create sysmlink to satisfy linker
 	if [[ -f "$SDL2_PREFIX/lib/libSDL2-2.0.so" && ! -f "$SDL2_PREFIX/lib/libSDL2.so" ]]; then
-	    mv "$SDL2_PREFIX/lib/libSDL2-2.0.so" "$SDL2_PREFIX/lib/libSDL2.so"
+		mv "$SDL2_PREFIX/lib/libSDL2-2.0.so" "$SDL2_PREFIX/lib/libSDL2.so"
 	fi
 
 	echo "==> SDL2 installed to: $SDL2_PREFIX"
@@ -315,11 +315,11 @@ bundle_shared_libs_into_jni() {
 		cp -L "$SDL2_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
 	fi
 
-	# gl4es (built by build_gl4es.sh) should already have produced libGL.so.1 here
-	if [[ -f "$JNI_DIR/libGL.so.1" ]]; then
-		echo "gl4es: found $JNI_DIR/libGL.so.1"
+	# gl4es (built by build_gl4es.sh) should already have produced libGL.so here
+	if [[ -f "$JNI_DIR/libGL.so" ]]; then
+		echo "gl4es: found $JNI_DIR/libGL.so"
 	else
-		echo "WARNING: libGL.so.1 not found in $JNI_DIR"
+		echo "WARNING: libGL.so not found in $JNI_DIR"
 		echo "         Run: bash build_scripts/build_gl4es.sh"
 	fi
 
@@ -327,10 +327,7 @@ bundle_shared_libs_into_jni() {
 }
 
 jni_libs_prepare() {
-	# Ensure expected *.so exist with proper names in jniLibs
-	if [[ -f "$JNI_DIR/libxmp.so" && ! -f "$JNI_DIR/libxmp.so.4" ]]; then
-		mv "$JNI_DIR/libxmp.so" "$JNI_DIR/libxmp.so.4"
-	fi
+	# ToDo: Check expected *.so exist with proper names in jniLibs
 
 	# Remove sysmlinks from jnilibs, they are not preserved
 	find "$JNI_DIR" -type l -delete
@@ -375,7 +372,7 @@ build_ikemen_android() {
 	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -DANDROID -fPIC"
 
 	# Linker flags: deps + gl4es + Android libs
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$LIBXMP_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -landroid -llog"
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$LIBXMP_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -lGL -landroid -llog"
 
 	# 4) Build as c-shared for JNI
 	local out_so="$JNI_DIR/libikemen.so"

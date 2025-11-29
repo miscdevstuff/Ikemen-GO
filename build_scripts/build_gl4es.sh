@@ -41,12 +41,12 @@ cmake --build build_android -- -j$(nproc)
 # Copy and Rename
 # Note: gl4es might output libGL.so.1 or libGL.so. We grab the shared object.
 echo "Copying library..."
-find lib -name "libGL.so*" -exec cp -L {} "$JNI_DIR/libGL.so.1" \;
+find lib -name "libGL.so*" -exec cp -L {} "$JNI_DIR/libGL.so" \;
 
-if [ -f "$JNI_DIR/libGL.so.1" ]; then
-	echo "Success: libGL.so.1 created."
+if [ -f "$JNI_DIR/libGL.so" ]; then
+	echo "Success: libGL.so created."
 else
-	echo "Error: libGL.so.1 was not created. Check CMake output."
+	echo "Error: libGL.so was not created. Check CMake output."
 	exit 1
 fi
 
@@ -54,8 +54,7 @@ fi
 ### Step 1: create a dummy `gl.pc` for gl4es
 mkdir -p "$GL4ES_PC_DIR/lib/pkgconfig" "$GL4ES_PC_DIR/include"
 cp -r include/* "$GL4ES_PC_DIR/include/"
-cp -L "$JNI_DIR/libGL.so.1" "$GL4ES_PC_DIR/lib/"
-cp -L "$JNI_DIR/libGL.so.1" "$GL4ES_PC_DIR/lib/libGL.so"
+find lib -name "libGL.so*" -exec cp -L {} "$GL4ES_PC_DIR/lib/libGL.so" \;
 
 cat > "$GL4ES_PC_DIR/lib/pkgconfig/gl.pc" << EOF
 prefix=@GL4ES_PC_DIR@
