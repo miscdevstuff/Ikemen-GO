@@ -41,12 +41,12 @@ cmake --build build_android -- -j$(nproc)
 # Copy and Rename
 # Note: gl4es might output libGL.so.1 or libGL.so. We grab the shared object.
 echo "Copying library..."
-find lib -name "libGL.so*" -exec cp {} "$JNI_DIR/libGL_es4.so" \;
+find lib -name "libGL.so*" -exec cp -L {} "$JNI_DIR/libGL.so.1" \;
 
-if [ -f "$JNI_DIR/libGL_es4.so" ]; then
-	echo "Success: libGL_es4.so created."
+if [ -f "$JNI_DIR/libGL.so.1" ]; then
+	echo "Success: libGL.so.1 created."
 else
-	echo "Error: libGL_es4.so was not created. Check CMake output."
+	echo "Error: libGL.so.1 was not created. Check CMake output."
 	exit 1
 fi
 
@@ -54,9 +54,10 @@ fi
 ### Step 1: create a dummy `gl.pc` for gl4es
 mkdir -p "$GL4ES_PC_DIR/lib/pkgconfig" "$GL4ES_PC_DIR/include"
 cp -r include/* "$GL4ES_PC_DIR/include/"
-cp "$JNI_DIR/libGL_es4.so" "$GL4ES_PC_DIR/lib/"
+cp -L "$JNI_DIR/libGL.so.1" "$GL4ES_PC_DIR/lib/"
+cp -L "$JNI_DIR/libGL.so.1" "$GL4ES_PC_DIR/lib/libGL.so"
 
-cat > $GL4ES_PC_DIR/lib/pkgconfig/gl.pc << 'EOF'
+cat > "$GL4ES_PC_DIR/lib/pkgconfig/gl.pc" << EOF
 prefix=@GL4ES_PC_DIR@
 exec_prefix=${prefix}
 libdir=${prefix}/lib
@@ -65,20 +66,6 @@ includedir=${prefix}/include
 Name: gl
 Description: OpenGL shim via gl4es for Ikemen GO Android
 Version: 1.0.0
-Libs: -L${libdir} -lGL_es4
-Cflags: -I${includedir}
+Libs: -L\${libdir} -lGL
+Cflags: -I\${includedir}
 EOF
-
-sed -e "s|@GL4ES_PC_DIR@|$GL4ES_PC_DIR|g" << 'EOF' > "$GL4ES_PC_DIR/lib/pkgconfig/gl.pc"
-prefix=@GL4ES_PC_DIR@
-exec_prefix=${prefix}
-libdir=${prefix}/lib
-includedir=${prefix}/include
-
-Name: gl
-Description: OpenGL shim via gl4es for Ikemen GO Android
-Version: 1.0.0
-Libs: -L${libdir} -lGL_es4
-Cflags: -I${includedir}
-EOF
-

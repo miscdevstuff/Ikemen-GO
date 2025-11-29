@@ -41,6 +41,7 @@ ANDROID_PREFIX_ROOT="$REPO_ROOT/build/android/$ANDROID_ABI"
 FFMPEG_PREFIX="$ANDROID_PREFIX_ROOT/ffmpeg"
 LIBXMP_PREFIX="$ANDROID_PREFIX_ROOT/libxmp"
 SDL2_PREFIX="$ANDROID_PREFIX_ROOT/sdl2"
+GL4ES_PREFIX="$ANDROID_PREFIX_ROOT/gl4es"
 
 # Where the final .so goes (for Gradle / APK)
 JNI_DIR="$REPO_ROOT/app_android/android/app/src/main/jniLibs/$ANDROID_ABI"
@@ -286,13 +287,13 @@ build_sdl2_android() {
 	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
 	make install
 
+	# if libSDL2.so doesnt exist create sysmlink to satisfy linker
+	if [[ -f "$SDL2_PREFIX/lib/libSDL2-2.0.so" && ! -f "$SDL2_PREFIX/lib/libSDL2.so" ]]; then
+	    mv "$SDL2_PREFIX/lib/libSDL2-2.0.so" "$SDL2_PREFIX/lib/libSDL2.so"
+	fi
+
 	echo "==> SDL2 installed to: $SDL2_PREFIX"
 	ls -R "$SDL2_PREFIX" || true
-	
-	# Ensure libSDL2.so exists (pkg-config uses -lSDL2)
-    if [[ -f "$SDL2_PREFIX/lib/libSDL2-2.0.so" && ! -f "$SDL2_PREFIX/lib/libSDL2.so" ]]; then
-        ( cd "$SDL2_PREFIX/lib" && ln -s libSDL2-2.0.so libSDL2.so )
-    fi
 
 	popd > /dev/null
 }
@@ -305,24 +306,40 @@ bundle_shared_libs_into_jni() {
 	mkdir -p "$JNI_DIR"
 
 	if [[ -d "$FFMPEG_PREFIX/lib" ]]; then
-		cp -av "$FFMPEG_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
+		cp -L "$FFMPEG_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
 	fi
 	if [[ -d "$LIBXMP_PREFIX/lib" ]]; then
-		cp -av "$LIBXMP_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
+		cp -L "$LIBXMP_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
 	fi
 	if [[ -d "$SDL2_PREFIX/lib" ]]; then
-		cp -av "$SDL2_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
+		cp -L "$SDL2_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
 	fi
 
-	# gl4es (built by build_gl4es.sh) should already have produced libGL_es4.so here
-	if [[ -f "$JNI_DIR/libGL_es4.so" ]]; then
-		echo "gl4es: found $JNI_DIR/libGL_es4.so"
+	# gl4es (built by build_gl4es.sh) should already have produced libGL.so.1 here
+	if [[ -f "$JNI_DIR/libGL.so.1" ]]; then
+		echo "gl4es: found $JNI_DIR/libGL.so.1"
 	else
-		echo "WARNING: libGL_es4.so not found in $JNI_DIR"
+		echo "WARNING: libGL.so.1 not found in $JNI_DIR"
 		echo "         Run: bash build_scripts/build_gl4es.sh"
 	fi
 
 	ls -lh "$JNI_DIR" || true
+}
+
+jni_libs_prepare() {
+	# Ensure expected *.so exist with proper names in jniLibs
+	if [[ -f "$JNI_DIR/libxmp.so" && ! -f "$JNI_DIR/libxmp.so.4" ]]; then
+		mv "$JNI_DIR/libxmp.so" "$JNI_DIR/libxmp.so.4"
+	fi
+
+	# Remove sysmlinks from jnilibs, they are not preserved
+	find "$JNI_DIR" -type l -delete
+
+	# Remove headers from jnilibs
+	find "$JNI_DIR" -name '*.h' -delete
+
+	echo "==> jniLibs contents after prepare:"
+	ls -l "$JNI_DIR"
 }
 
 # --------------------------------------------------------------------
@@ -339,7 +356,7 @@ build_ikemen_android() {
 	# 2) Make Android-built libs visible to pkg-config
 	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$LIBXMP_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 	# pkg-config for go-gl -> gl4es
-	export PKG_CONFIG_PATH="$ANDROID_PREFIX_ROOT/gl4es/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+	export PKG_CONFIG_PATH="$GL4ES_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 	local pc="${PKG_CONFIG:-pkg-config}"
 
 	# Flags for FFmpeg + libxmp + SDL2 (same idea as build/build.sh)
@@ -355,10 +372,10 @@ build_ikemen_android() {
 	export GOEXPERIMENT=arenas
 
 	# C flags: deps + gl4es headers + Android
-	export CGO_CFLAGS="${deps_cflags} -I$REPO_ROOT/external/gl4es/include -DANDROID -fPIC"
+	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -DANDROID -fPIC"
 
 	# Linker flags: deps + gl4es + Android libs
-	export CGO_LDFLAGS="${deps_libs} -L$JNI_DIR -lGL_es4 -landroid -llog"
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$LIBXMP_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -landroid -llog"
 
 	# 4) Build as c-shared for JNI
 	local out_so="$JNI_DIR/libikemen.so"
@@ -381,9 +398,7 @@ main() {
 
 	build_ikemen_android
 	bundle_shared_libs_into_jni
-
-	# Remove headers from jnilibs
-	find $JNI_DIR -name '*.h' -delete
+	jni_libs_prepare
 
 	echo "=== Android core build complete ==="
 	echo "  JNI libs in: $JNI_DIR"
