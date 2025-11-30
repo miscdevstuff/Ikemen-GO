@@ -43,6 +43,9 @@ LIBXMP_PREFIX="$ANDROID_PREFIX_ROOT/libxmp"
 SDL2_PREFIX="$ANDROID_PREFIX_ROOT/sdl2"
 GL4ES_PREFIX="$ANDROID_PREFIX_ROOT/gl4es"
 
+# Download cache
+DL_DIR="$REPO_ROOT/build/downloads"
+
 # Where the final .so goes (for Gradle / APK)
 JNI_DIR="$REPO_ROOT/app_android/android/app/src/main/jniLibs/$ANDROID_ABI"
 mkdir -p "$JNI_DIR"
@@ -64,6 +67,8 @@ ensure_host_deps() {
 	local missing=()
 	need() { command -v "$1" > /dev/null 2>&1 || missing+=("$1"); }
 
+	need wget
+	need tar
 	need git
 	need pkg-config
 	need autoconf
@@ -77,8 +82,7 @@ ensure_host_deps() {
 	if ((${#missing[@]})); then
 		echo "ERROR: Missing host tools: ${missing[*]}" >&2
 		echo "Install on Debian/Ubuntu (example):" >&2
-		echo '  sudo apt update && sudo apt install -y \' >&2
-		echo "    git pkg-config autoconf automake libtool make nasm yasm golang" >&2
+		echo "  sudo apt update && sudo apt install -y ${missing[*]}" >&2
 		exit 1
 	fi
 }
@@ -154,18 +158,50 @@ EOF
 }
 
 # --------------------------------------------------------------------
+# Download helper (with caching)
+# --------------------------------------------------------------------
+download_and_extract() {
+	local url="$1"
+	local dest_dir="$2"
+	local filename
+	filename="$(basename "$url")"
+
+	mkdir -p "$DL_DIR"
+	local archive="$DL_DIR/$filename"
+
+	if [[ ! -f $archive ]]; then
+		echo "==> Downloading $url"
+		wget -O "$archive" "$url"
+	else
+		echo "==> Using cached $archive"
+	fi
+
+	rm -rf "$dest_dir"
+	mkdir -p "$dest_dir"
+
+	case "$archive" in
+		*.tar.xz) tar -xJf "$archive" -C "$dest_dir" --strip-components=1 ;;
+		*.tar.gz) tar -xzf "$archive" -C "$dest_dir" --strip-components=1 ;;
+		*.zip) unzip -q "$archive" -d "$dest_dir" &&
+			mv "$dest_dir"/*/* "$dest_dir" 2> /dev/null || true ;;
+		*)
+			echo "ERROR: Unknown archive type for $archive" >&2
+			exit 1
+			;;
+	esac
+}
+
+# --------------------------------------------------------------------
 # FFmpeg build (minimal feature set, Android)
 # --------------------------------------------------------------------
 build_ffmpeg_android() {
-	local FFMPEG_REV="release/7.1"
 	local srcdir="$REPO_ROOT/build/ffmpeg-src-android-$ANDROID_ABI"
+	local url="https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz"
 
 	echo "==> Building FFmpeg for Android (prefix=$FFMPEG_PREFIX)"
-	rm -rf "$srcdir"
-	mkdir -p "$(dirname "$srcdir")"
-	git clone https://github.com/FFmpeg/FFmpeg.git "$srcdir"
+	download_and_extract "$url" "$srcdir"
+
 	pushd "$srcdir" > /dev/null
-	git checkout "$FFMPEG_REV"
 
 	local cfg=(
 		"--prefix=$FFMPEG_PREFIX"
@@ -221,7 +257,7 @@ build_libxmp_android() {
 	echo "==> Building libxmp for Android (prefix=$LIBXMP_PREFIX)"
 	rm -rf "$srcdir"
 	mkdir -p "$(dirname "$srcdir")"
-	git clone https://github.com/cmatsuoka/libxmp.git "$srcdir"
+	git clone --depth 1 --single-branch https://github.com/cmatsuoka/libxmp.git "$srcdir"
 	pushd "$srcdir" > /dev/null
 
 	autoreconf -fi || true
@@ -249,19 +285,14 @@ build_libxmp_android() {
 # --------------------------------------------------------------------
 build_sdl2_android() {
 	local srcdir="$REPO_ROOT/build/sdl2-src-android-$ANDROID_ABI"
+	local url="https://github.com/libsdl-org/SDL/releases/download/release-2.32.8/SDL2-2.32.8.tar.gz"
 
 	echo "==> Building SDL2 for Android (prefix=$SDL2_PREFIX)"
-	rm -rf "$srcdir"
-	mkdir -p "$(dirname "$srcdir")"
-	git clone https://github.com/libsdl-org/SDL.git "$srcdir"
+	download_and_extract "$url" "$srcdir"
 	pushd "$srcdir" > /dev/null
 
-	# IMPORTANT: use SDL2, not SDL3 (default branch)
-	# Pick a stable 2.30.x tag that still has configure/ac
-	git checkout release-2.30.10 || git checkout release-2.30.9 || git checkout SDL2 || true
-
-	# If autogen.sh exists, run it to generate configure
-	if [[ -f "./autogen.sh" ]]; then
+	# If confiure doesnt exist but autogen.sh exists, run it to generate configure
+	if [[ ! -f "./configure" && -f "./autogen.sh" ]]; then
 		./autogen.sh
 	fi
 
@@ -287,7 +318,7 @@ build_sdl2_android() {
 	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
 	make install
 
-	# if libSDL2.so doesnt exist create sysmlink to satisfy linker
+	# if libSDL2.so doesnt exist copy libSDL2-2.0.so as libSDL2.so to satisfy linker
 	if [[ -f "$SDL2_PREFIX/lib/libSDL2-2.0.so" && ! -f "$SDL2_PREFIX/lib/libSDL2.so" ]]; then
 		cp -L "$SDL2_PREFIX/lib/libSDL2-2.0.so" "$SDL2_PREFIX/lib/libSDL2.so"
 	fi
@@ -302,7 +333,7 @@ build_sdl2_android() {
 # Bundle native shared libs into jniLibs
 # --------------------------------------------------------------------
 bundle_shared_libs_into_jni() {
-	echo "==> Copying FFmpeg/libxmp/SDL2 .so to $JNI_DIR"
+	echo "==> Copying shared librari to $JNI_DIR"
 	mkdir -p "$JNI_DIR"
 
 	if [[ -d "$FFMPEG_PREFIX/lib" ]]; then
@@ -325,9 +356,9 @@ jni_libs_prepare() {
 	find "$JNI_DIR" -name '*.h' -delete
 
 	# Remove unnecessary/duplicate files
-	if [[ -f "$JNI_DIR/libSDL2.so" ]]; then
-		rm "$JNI_DIR/libSDL2.so"
-	fi
+	# if [[ -f "$JNI_DIR/libSDL2.so" ]]; then
+ 	#	rm "$JNI_DIR/libSDL2.so"
+ 	#fi
 
 	echo "==> jniLibs contents after prepare:"
 	ls -l "$JNI_DIR"
@@ -364,7 +395,7 @@ build_ikemen_android() {
 	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC"
 
 	# Linker flags: shared deps + Android libs + static libxmp gl4es
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$LIBXMP_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib/libGL.a -landroid -llog"
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog"
 
 	# 4) Build as c-shared for JNI
 	local out_so="$JNI_DIR/libikemen.so"
@@ -382,9 +413,15 @@ build_ikemen_android() {
 # main
 # --------------------------------------------------------------------
 main() {
+	# Ensure build_gl4es.sh was run before this
+	if [[ ! -f "$GL4ES_PREFIX/lib/libGL.a" ]]; then
+		echo "ERROR: gl4es static lib not found at $GL4ES_PREFIX/lib/libGL.a" >&2
+		echo "Run: bash build_scripts/build_gl4es.sh first." >&2
+		exit 1
+	fi
+
 	ensure_host_deps
 	setup_ndk
-
 	build_ikemen_android
 	bundle_shared_libs_into_jni
 	jni_libs_prepare
