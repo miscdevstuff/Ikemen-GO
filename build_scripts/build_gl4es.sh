@@ -6,65 +6,49 @@ NDK_VER="27.1.12297006"
 if [ -z "$ANDROID_NDK_HOME" ]; then
 	export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VER"
 fi
+NDK_BUILD="$ANDROID_NDK_HOME/ndk-build"
+if [ ! -x "$NDK_BUILD" ]; then
+	echo "ERROR: ndk-build not found at $NDK_BUILD" >&2
+	exit 1
+fi
 
 # Resolve repo root (one level above build_scripts)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 API_LEVEL="${ANDROID_API:-24}"
 ANDROID_ABI="${ANDROID_ABI:-arm64-v8a}"
-# Output directory for gl4es pkg-config module
+# Output directory for gl4es
 GL4ES_PC_DIR="$REPO_ROOT/build/android/$ANDROID_ABI/gl4es"
-# Output directory relative to repo root
-JNI_DIR="$REPO_ROOT/app_android/android/app/src/main/jniLibs/$ANDROID_ABI"
-
-mkdir -p "$JNI_DIR" "$GL4ES_PC_DIR"
 
 echo "=== Building gl4es ==="
-cd external/gl4es
+cd "$REPO_ROOT/external/gl4es"
 rm -rf build_android
+mkdir -p build_android/obj build_android/libs
 
-# Configure
-cmake -B build_android \
-	-DANDROID_ABI=$ANDROID_ABI \
-	-DANDROID_PLATFORM=android-$API_LEVEL \
-	-DANDROID_NDK=$ANDROID_NDK_HOME \
-	-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-	-DDEFAULT_ES=2 \
-	-DLIBGL_ES=2 \
-	-DNO_X11=ON \
-	-DNO_GBM=ON \
-	-DCMAKE_BUILD_TYPE=Release \
-	-DCMAKE_C_FLAGS="-Wno-error=format-security" # Suppress format errors if any
+# Use gl4es' Android.mk to build a static libGL.a
+"$NDK_BUILD" \
+	NDK_PROJECT_PATH="$PWD" \
+	APP_BUILD_SCRIPT="$PWD/Android.mk" \
+	APP_ABI="$ANDROID_ABI" \
+	APP_PLATFORM="android-$API_LEVEL" \
+	NDK_OUT="$PWD/build_android/obj" \
+	NDK_LIBS_OUT="$PWD/build_android/libs"
 
-# Build
-cmake --build build_android -- -j$(nproc)
-
-# Copy and Rename
-# Note: gl4es might output libGL.so.1 or libGL.so. We grab the shared object.
-echo "Copying library..."
-find lib -name "libGL.so*" -exec cp -L {} "$JNI_DIR/libGL.so" \;
-
-if [ -f "$JNI_DIR/libGL.so" ]; then
-	echo "Success: libGL.so created."
-else
-	echo "Error: libGL.so was not created. Check CMake output."
+# For a BUILD_STATIC_LIBRARY target, ndk-build drops libGL.a under obj/local/<abi>/
+GL_STATIC="$(find build_android -maxdepth 6 -path '*obj/local*' -name 'libGL.a' | head -n1 || true)"
+if [ -z "$GL_STATIC" ]; then
+	echo "ERROR: libGL.a not produced by gl4es ndk-build" >&2
+	find build_android -maxdepth 8 -type f -name 'libGL*' || true
 	exit 1
 fi
 
-# Also expose this as a valid gl pkg-config module for ikemen-go android build
-### Step 1: create a dummy `gl.pc` for gl4es
-mkdir -p "$GL4ES_PC_DIR/lib/pkgconfig" "$GL4ES_PC_DIR/include"
+echo "Found static gl4es archive: $GL_STATIC"
+
+# Install to our gl4es dir
+mkdir -p "$GL4ES_PC_DIR/lib" "$GL4ES_PC_DIR/include"
+cp -L "$GL_STATIC" "$GL4ES_PC_DIR/lib/libGL.a"
 cp -r include/* "$GL4ES_PC_DIR/include/"
-find lib -name "libGL.so*" -exec cp -L {} "$GL4ES_PC_DIR/lib/libGL.so" \;
 
-cat > "$GL4ES_PC_DIR/lib/pkgconfig/gl.pc" << EOF
-prefix=@GL4ES_PC_DIR@
-exec_prefix=${prefix}
-libdir=${prefix}/lib
-includedir=${prefix}/include
+echo "Installed static lib to: $GL4ES_PC_DIR/lib/libGL.a"
+echo "Headers installed under: $GL4ES_PC_DIR/include"
 
-Name: gl
-Description: OpenGL shim via gl4es for Ikemen GO Android
-Version: 1.0.0
-Libs: -L\${libdir} -lGL
-Cflags: -I\${includedir}
-EOF
+echo "=== gl4es static build complete ==="
