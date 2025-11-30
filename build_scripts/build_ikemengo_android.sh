@@ -229,8 +229,8 @@ build_libxmp_android() {
 	./configure \
 		--host="$ANDROID_TRIPLE" \
 		--prefix="$LIBXMP_PREFIX" \
-		--enable-shared \
-		--disable-static \
+		--enable-static \
+		--disable-shared \
 		CC="$CC" \
 		AR="$AR" \
 		RANLIB="$RANLIB" \
@@ -289,7 +289,7 @@ build_sdl2_android() {
 
 	# if libSDL2.so doesnt exist create sysmlink to satisfy linker
 	if [[ -f "$SDL2_PREFIX/lib/libSDL2-2.0.so" && ! -f "$SDL2_PREFIX/lib/libSDL2.so" ]]; then
-		mv "$SDL2_PREFIX/lib/libSDL2-2.0.so" "$SDL2_PREFIX/lib/libSDL2.so"
+		cp -L "$SDL2_PREFIX/lib/libSDL2-2.0.so" "$SDL2_PREFIX/lib/libSDL2.so"
 	fi
 
 	echo "==> SDL2 installed to: $SDL2_PREFIX"
@@ -308,19 +308,8 @@ bundle_shared_libs_into_jni() {
 	if [[ -d "$FFMPEG_PREFIX/lib" ]]; then
 		cp -L "$FFMPEG_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
 	fi
-	if [[ -d "$LIBXMP_PREFIX/lib" ]]; then
-		cp -L "$LIBXMP_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
-	fi
 	if [[ -d "$SDL2_PREFIX/lib" ]]; then
 		cp -L "$SDL2_PREFIX"/lib/*.so "$JNI_DIR/" 2> /dev/null || true
-	fi
-
-	# gl4es (built by build_gl4es.sh) should already have produced libGL.so here
-	if [[ -f "$JNI_DIR/libGL.so" ]]; then
-		echo "gl4es: found $JNI_DIR/libGL.so"
-	else
-		echo "WARNING: libGL.so not found in $JNI_DIR"
-		echo "         Run: bash build_scripts/build_gl4es.sh"
 	fi
 
 	ls -lh "$JNI_DIR" || true
@@ -334,6 +323,11 @@ jni_libs_prepare() {
 
 	# Remove headers from jnilibs
 	find "$JNI_DIR" -name '*.h' -delete
+
+	# Remove unnecessary/duplicate files
+	if [[ -f "$JNI_DIR/libSDL2.so" ]]; then
+		rm "$JNI_DIR/libSDL2.so"
+	fi
 
 	echo "==> jniLibs contents after prepare:"
 	ls -l "$JNI_DIR"
@@ -351,16 +345,14 @@ build_ikemen_android() {
 	build_sdl2_android
 
 	# 2) Make Android-built libs visible to pkg-config
-	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$LIBXMP_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-	# pkg-config for go-gl -> gl4es
-	export PKG_CONFIG_PATH="$GL4ES_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 	local pc="${PKG_CONFIG:-pkg-config}"
 
 	# Flags for FFmpeg + libxmp + SDL2 (same idea as build/build.sh)
 	local deps_cflags
 	local deps_libs
-	deps_cflags="$($pc --cflags libavformat libavcodec libavutil libswscale libswresample libavfilter libxmp sdl2)"
-	deps_libs="$($pc --libs libavformat libavcodec libavutil libswscale libswresample libavfilter libxmp sdl2)"
+	deps_cflags="$($pc --cflags libavformat libavcodec libavutil libswscale libswresample libavfilter sdl2)"
+	deps_libs="$($pc --libs libavformat libavcodec libavutil libswscale libswresample libavfilter sdl2)"
 
 	# 3) Go / CGO setup
 	export GOOS=android
@@ -368,11 +360,11 @@ build_ikemen_android() {
 	export CGO_ENABLED=1
 	export GOEXPERIMENT=arenas
 
-	# C flags: deps + gl4es headers + Android
-	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -DANDROID -fPIC"
+	# C flags: deps + gl4es headers + libxmp headers + Android
+	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC"
 
-	# Linker flags: deps + gl4es + Android libs
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$LIBXMP_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -lGL -landroid -llog"
+	# Linker flags: shared deps + Android libs + static libxmp gl4es
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$LIBXMP_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib/libGL.a -landroid -llog"
 
 	# 4) Build as c-shared for JNI
 	local out_so="$JNI_DIR/libikemen.so"
