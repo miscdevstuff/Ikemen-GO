@@ -67,21 +67,31 @@ func RunGame() {
 		}
 	}
 
-	// Make save directories, if they don't exist
-	os.Mkdir("save", os.ModeSticky|0755)
-	os.Mkdir("save/replays", os.ModeSticky|0755)
-	os.Mkdir("save/logs", os.ModeSticky|0755)
+    // Make save directories, if they don't exist
+    if err := os.MkdirAll("save/replays", os.ModeSticky|0o755); err != nil {
+        fmt.Println("[Ikemen] WARNING: couldn't create save/replays:", err)
+    }
+    if err := os.MkdirAll("save/logs", os.ModeSticky|0o755); err != nil {
+        fmt.Println("[Ikemen] WARNING: couldn't create save/logs:", err)
+    }
 
 	processCommandLine()
 
-	// Try reading stats
-	if _, err := os.ReadFile("save/stats.json"); err != nil {
-		// If there was an error reading, write an empty json file
-		f, err := os.Create("save/stats.json")
-		chk(err)
-		f.Write([]byte("{}"))
-		chk(f.Close())
-	}
+    // Try reading stats
+    if _, err := os.ReadFile("save/stats.json"); err != nil {
+        fmt.Println("[Ikemen] stats.json missing, will create:", err)
+        if f, err2 := os.Create("save/stats.json"); err2 != nil {
+            fmt.Println("[Ikemen] FAILED to create save/stats.json:", err2)
+            // Don't panic here; game can still run without stats.
+        } else {
+            if _, err3 := f.Write([]byte("{}")); err3 != nil {
+                fmt.Println("[Ikemen] FAILED to write stats.json:", err3)
+            }
+            if err4 := f.Close(); err4 != nil {
+                fmt.Println("[Ikemen] FAILED to close stats.json:", err4)
+            }
+        }
+    }
 
 	// Config file path
 	cfgPath := "save/config.ini"
@@ -143,13 +153,23 @@ func RunGame() {
 
 // RunGameAndroid is the entrypoint we call from JNI on Android.
 // It locks the calling thread for the whole lifetime of the game loop.
-func RunGameAndroid() {
+func RunGameAndroid(basePath string) {
     println("[Ikemen] RunGameAndroid: locking OS thread")
     runtime.LockOSThread()
     defer func() {
         println("[Ikemen] RunGameAndroid: unlocking OS thread / returning")
         runtime.UnlockOSThread()
     }()
+
+    if basePath != "" {
+        if err := os.Chdir(basePath); err != nil {
+            fmt.Println("[Ikemen] RunGameAndroid: chdir to basePath failed:", err)
+        } else {
+            if wd, err := os.Getwd(); err == nil {
+                fmt.Println("[Ikemen] RunGameAndroid: cwd =", wd)
+            }
+        }
+    }
 
     println("[Ikemen] RunGameAndroid: calling RunGame()")
     RunGame()
