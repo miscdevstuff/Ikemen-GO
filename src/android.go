@@ -7,9 +7,14 @@ package main
 #include <stdlib.h>
 #include <string.h>
 
-// Duplicate a Java string into a newly-allocated C string (UTF-8)
-static char* ikm_dup_jstring(JNIEnv* env, jstring js) {
-    if (!js) return NULL;
+// Check if a jstring is NULL-equivalent
+static int jstr_is_null(JNIEnv* env, jstring js) {
+    return (*env)->IsSameObject(env, js, NULL);
+}
+
+// Duplicate a Java string into malloc'd C string (UTF-8)
+static char* jstr_dup(JNIEnv* env, jstring js) {
+    if (jstr_is_null(env, js)) return NULL;
     const char* utf = (*env)->GetStringUTFChars(env, js, 0);
     if (!utf) return NULL;
     size_t len = strlen(utf);
@@ -26,9 +31,13 @@ static char* ikm_dup_jstring(JNIEnv* env, jstring js) {
 import "C"
 
 import (
-    "fmt"
+    "log"
+    "os"
+    "runtime"
     "unsafe"
 )
+
+var androidBasePath string
 
 //export Java_com_ikemenmobile_IkemenNative_runIkemen
 func Java_com_ikemenmobile_IkemenNative_runIkemen(
@@ -36,19 +45,28 @@ func Java_com_ikemenmobile_IkemenNative_runIkemen(
     thiz C.jobject,
     basePath C.jstring,
 ) {
-    cStr := C.ikm_dup_jstring(env, basePath)
-    var goBase string
-    if cStr != nil {
-        goBase = C.GoString(cStr)
-        C.free(unsafe.Pointer(cStr))
+    runtime.LockOSThread()
+    defer runtime.UnlockOSThread()
+
+    // Convert jstring → Go string safely
+    cpath := C.jstr_dup(env, basePath)
+    if cpath != nil {
+        androidBasePath = C.GoString(cpath)
+        C.free(unsafe.Pointer(cpath))
+        log.Printf("[Ikemen] basePath = %s", androidBasePath)
+    } else {
+        log.Printf("[Ikemen] basePath is NULL; using default")
     }
-	// Very verbose debug trace
-	println("[Ikemen JNI] Java_com_ikemenmobile_IkemenNative_runIkemen: ENTER")
 
-    fmt.Println("[Ikemen JNI] Java_com_ikemenmobile_IkemenNative_runIkemen: basePath =", goBase)
+    if androidBasePath != "" {
+        if err := os.Chdir(androidBasePath); err != nil {
+            log.Printf("[Ikemen] chdir failed: %v", err)
+        } else {
+            log.Printf("[Ikemen] chdir OK → %s", androidBasePath)
+        }
+    }
 
-    // Hand over to the Android-specific entrypoint in Go.
-    RunGameAndroid(goBase)
-
-    println("[Ikemen JNI] Java_com_ikemenmobile_IkemenNative_runIkemen: EXIT (RunGameAndroid returned)")
+    log.Printf("[Ikemen] RunGame() starting…")
+    RunGame()
+    log.Printf("[Ikemen] RunGame() finished")
 }
