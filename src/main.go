@@ -150,17 +150,25 @@ func RunGame() {
 // RunGameAndroid is the entrypoint we call from JNI on Android.
 // It locks the calling thread for the whole lifetime of the game loop.
 func RunGameAndroid() {
+    println("[Ikemen] RunGameAndroid: locking OS thread")
     runtime.LockOSThread()
-    defer runtime.UnlockOSThread()
+    defer func() {
+        println("[Ikemen] RunGameAndroid: unlocking OS thread / returning")
+        runtime.UnlockOSThread()
+    }()
 
+    println("[Ikemen] RunGameAndroid: calling RunGame()")
     RunGame()
+    println("[Ikemen] RunGameAndroid: RunGame() returned")
 }
 
 func main() {
-    // If we are on Desktop (Windows/Linux/Mac), run immediately.
-    // If we are on Android, DO NOTHING. The Java side will call 'run()' manually.
+    // Desktop: run directly. Android: do nothing; JNI calls RunGameAndroid.
     if runtime.GOOS != "android" {
+        println("[Ikemen] main(): desktop mode, calling RunGame() directly")
         RunGame()
+    } else {
+        println("[Ikemen] main(): android build, waiting for JNI entrypoint")
     }
 }
 
