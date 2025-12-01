@@ -16,7 +16,11 @@ var Version = "development"
 var BuildTime = "" // Set automatically by GitHub Actions
 
 func init() {
-	runtime.LockOSThread()
+	// On desktop we still want everything on a single OS thread for SDL/GL.
+    // On Android, the JNI entrypoint will lock its own thread instead.
+    if runtime.GOOS != "android" {
+        runtime.LockOSThread()
+    }
 }
 
 // Checks if error is not null, if there is an error it displays a error dialogue box and crashes the program.
@@ -135,6 +139,15 @@ func RunGame() {
 			panic(err)
 		}
 	}
+}
+
+// RunGameAndroid is the entrypoint we call from JNI on Android.
+// It locks the calling thread for the whole lifetime of the game loop.
+func RunGameAndroid() {
+    runtime.LockOSThread()
+    defer runtime.UnlockOSThread()
+
+    RunGame()
 }
 
 func main() {
