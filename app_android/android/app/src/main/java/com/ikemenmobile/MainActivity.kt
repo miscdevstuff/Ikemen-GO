@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
         Thread {
             Log.d(TAG, "Ikemen thread started, calling IkemenNative.runIkemen()")
             try {
+                Log.d("IkemenNative", "Launching Ikemen with basePath=$basePath")
                 IkemenNative.runIkemen(basePath)
                 Log.d(TAG, "IkemenNative.runIkemen() returned normally")
             } catch (t: Throwable) {

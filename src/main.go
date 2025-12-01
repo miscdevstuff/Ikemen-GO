@@ -67,10 +67,13 @@ func RunGame() {
 		}
 	}
 
-	// Make save directories, if they don't exist
-	os.Mkdir("save", os.ModeSticky|0755)
-	os.Mkdir("save/replays", os.ModeSticky|0755)
-	os.Mkdir("save/logs", os.ModeSticky|0755)
+    // Make save directories, if they don't exist
+    if err := os.MkdirAll("save/replays", os.ModeSticky|0o755); err != nil {
+        fmt.Println("[Ikemen] WARNING: couldn't create save/replays:", err)
+    }
+    if err := os.MkdirAll("save/logs", os.ModeSticky|0o755); err != nil {
+        fmt.Println("[Ikemen] WARNING: couldn't create save/logs:", err)
+    }
 
 	processCommandLine()
 
@@ -149,13 +152,23 @@ func RunGame() {
 
 // RunGameAndroid is the entrypoint we call from JNI on Android.
 // It locks the calling thread for the whole lifetime of the game loop.
-func RunGameAndroid() {
+func RunGameAndroid(basePath string) {
     println("[Ikemen] RunGameAndroid: locking OS thread")
     runtime.LockOSThread()
     defer func() {
         println("[Ikemen] RunGameAndroid: unlocking OS thread / returning")
         runtime.UnlockOSThread()
     }()
+
+    if basePath != "" {
+        if err := os.Chdir(basePath); err != nil {
+            fmt.Println("[Ikemen] RunGameAndroid: chdir to basePath failed:", err)
+        } else {
+            if wd, err := os.Getwd(); err == nil {
+                fmt.Println("[Ikemen] RunGameAndroid: cwd =", wd)
+            }
+        }
+    }
 
     println("[Ikemen] RunGameAndroid: calling RunGame()")
     RunGame()
