@@ -357,8 +357,8 @@ jni_libs_prepare() {
 
 	# Remove unnecessary/duplicate files
 	# if [[ -f "$JNI_DIR/libSDL2.so" ]]; then
- 	#	rm "$JNI_DIR/libSDL2.so"
- 	#fi
+	#	rm "$JNI_DIR/libSDL2.so"
+	# fi
 
 	echo "==> jniLibs contents after prepare:"
 	ls -l "$JNI_DIR"
@@ -397,12 +397,12 @@ build_ikemen_android() {
 	# Linker flags: shared deps + Android libs + static libxmp gl4es
 	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog"
 
-	# 4) Build as c-shared for JNI
+	# 4) Build as c-shared for JNI, add `-s -w` in ldflags to strip debug symbols
 	local out_so="$JNI_DIR/libikemen.so"
 	go build -tags android \
 		-buildmode=c-shared \
 		-trimpath \
-		-ldflags="-s -w -X 'main.Version=${APP_VERSION}' -X 'main.BuildTime=${APP_BUILDTIME}'" \
+		-ldflags="-X 'main.Version=${APP_VERSION}' -X 'main.BuildTime=${APP_BUILDTIME}'" \
 		-o "$out_so" \
 		./src
 
