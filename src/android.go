@@ -35,5 +35,5 @@ func Java_com_ikemenmobile_IkemenNative_runIkemen(
 	// For now we ignore basePath here; RunGame() uses its own logic.
 	// If we want to wire it through later, we can add a small C helper
 	// to convert jstring -> Go string and store it into sys.xxxx.
-	RunGame()
+	RunGameAndroid()
 }
