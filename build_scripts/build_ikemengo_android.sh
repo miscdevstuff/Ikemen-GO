@@ -395,7 +395,7 @@ build_ikemen_android() {
 	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC"
 
 	# Linker flags: shared deps + Android libs + static libxmp gl4es
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog"
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -lEGL -lGLESv2 -landroid -llog"
 
 	# 4) Build as c-shared for JNI, add `-s -w` in ldflags to strip debug symbols
 	local out_so="$JNI_DIR/libikemen.so"
