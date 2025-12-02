@@ -310,7 +310,7 @@ build_sdl2_android() {
 		--enable-shared \
 		--disable-static \
 		--disable-audio \
-		--disable-video-opengl \
+		--enable-video-opengl \
 		--disable-hidapi \
 		CC="$CC" \
 		AR="$AR" \
@@ -391,7 +391,7 @@ build_ikemen_android() {
 	build_sdl2_android
 
 	# 2) Make Android-built libs visible to pkg-config
-	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:$GL4ES_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 	local pc="${PKG_CONFIG:-pkg-config}"
 
 	# Flags for FFmpeg + libxmp + SDL2 (same idea as build/build.sh)
@@ -407,10 +407,10 @@ build_ikemen_android() {
 	export GOEXPERIMENT=arenas
 
 	# C flags: deps + gl4es headers + libxmp headers + Android
-	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC"
+	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC -DNOX11"
 
 	# Linker flags: shared deps + Android libs + static libxmp gl4es
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -lEGL -lGLESv2 -landroid -llog"
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a -lEGL -lGLESv2 -landroid -llog"
 
 	# 4) Build as c-shared for JNI, add `-s -w` in ldflags to strip debug symbols
 	local out_so="$JNI_DIR/libikemen.so"
