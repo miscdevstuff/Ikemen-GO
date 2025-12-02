@@ -46,6 +46,8 @@ GL4ES_PREFIX="$ANDROID_PREFIX_ROOT/gl4es"
 # Download cache
 DL_DIR="$REPO_ROOT/build/downloads"
 
+# Where assets need to be copied to
+ASSETS_DIR="$REPO_ROOT/app_android/android/app/src/main/assets"
 # Where the final .so goes (for Gradle / APK)
 JNI_DIR="$REPO_ROOT/app_android/android/app/src/main/jniLibs/$ANDROID_ABI"
 mkdir -p "$JNI_DIR"
@@ -195,7 +197,7 @@ download_and_extract() {
 # FFmpeg build (minimal feature set, Android)
 # --------------------------------------------------------------------
 build_ffmpeg_android() {
-	local srcdir="$REPO_ROOT/build/ffmpeg-src-android-$ANDROID_ABI"
+	local srcdir="$REPO_ROOT/build/ffmpeg-src"
 	local url="https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz"
 
 	echo "==> Building FFmpeg for Android (prefix=$FFMPEG_PREFIX)"
@@ -252,7 +254,7 @@ build_ffmpeg_android() {
 # libxmp build (module music)
 # --------------------------------------------------------------------
 build_libxmp_android() {
-	local srcdir="$REPO_ROOT/build/libxmp-src-android-$ANDROID_ABI"
+	local srcdir="$REPO_ROOT/build/libxmp-src"
 
 	echo "==> Building libxmp for Android (prefix=$LIBXMP_PREFIX)"
 	rm -rf "$srcdir"
@@ -284,7 +286,7 @@ build_libxmp_android() {
 # SDL2 build (for go-sdl2 on Android)
 # --------------------------------------------------------------------
 build_sdl2_android() {
-	local srcdir="$REPO_ROOT/build/sdl2-src-android-$ANDROID_ABI"
+	local srcdir="$REPO_ROOT/build/sdl2-src"
 	local url="https://github.com/libsdl-org/SDL/releases/download/release-2.32.8/SDL2-2.32.8.tar.gz"
 
 	echo "==> Building SDL2 for Android (prefix=$SDL2_PREFIX)"
@@ -346,7 +348,7 @@ bundle_shared_libs_into_jni() {
 	ls -lh "$JNI_DIR" || true
 }
 
-jni_libs_prepare() {
+android_app_prepare() {
 	# ToDo: Check expected *.so exist with proper names in jniLibs
 
 	# Remove sysmlinks from jnilibs, they are not preserved
@@ -362,6 +364,19 @@ jni_libs_prepare() {
 
 	echo "==> jniLibs contents after prepare:"
 	ls -l "$JNI_DIR"
+
+	# Copy required assets to assets folder
+	if [[ ! -d $ASSETS_DIR ]]; then
+		mkdir "$ASSETS_DIR"
+	fi
+	if [[ ! -d "$ASSETS_DIR/data" ]]; then
+		cp -r "$REPO_ROOT/data" "$ASSETS_DIR/data"
+	fi
+	if [[ ! -d "$ASSETS_DIR/external" ]]; then
+		cp -r "$REPO_ROOT/external" "$ASSETS_DIR/external"
+	fi
+	echo "==> Assets copied:"
+	ls -l "$ASSETS_DIR"
 }
 
 # --------------------------------------------------------------------
@@ -424,7 +439,7 @@ main() {
 	setup_ndk
 	build_ikemen_android
 	bundle_shared_libs_into_jni
-	jni_libs_prepare
+	android_app_prepare
 
 	echo "=== Android core build complete ==="
 	echo "  JNI libs in: $JNI_DIR"

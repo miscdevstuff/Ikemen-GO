@@ -17,10 +17,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 API_LEVEL="${ANDROID_API:-24}"
 ANDROID_ABI="${ANDROID_ABI:-arm64-v8a}"
 # Output directory for gl4es
-GL4ES_PC_DIR="$REPO_ROOT/build/android/$ANDROID_ABI/gl4es"
+GL4ES_PREFIX="$REPO_ROOT/build/android/$ANDROID_ABI/gl4es"
 
 echo "=== Building gl4es ==="
-cd "$REPO_ROOT/external/gl4es"
+cd "$REPO_ROOT/build/gl4es-src"
 rm -rf build_android
 mkdir -p build_android/obj build_android/libs
 
@@ -44,11 +44,11 @@ fi
 echo "Found static gl4es archive: $GL_STATIC"
 
 # Install to our gl4es dir
-mkdir -p "$GL4ES_PC_DIR/lib" "$GL4ES_PC_DIR/include"
-cp -L "$GL_STATIC" "$GL4ES_PC_DIR/lib/libGL.a"
-cp -r include/* "$GL4ES_PC_DIR/include/"
+mkdir -p "$GL4ES_PREFIX/lib"
+cp -L "$GL_STATIC" "$GL4ES_PREFIX/lib/libGL.a"
+cp -r "$REPO_ROOT/build/gl4es-src/include" "$GL4ES_PREFIX/include"
 
-echo "Installed static lib to: $GL4ES_PC_DIR/lib/libGL.a"
-echo "Headers installed under: $GL4ES_PC_DIR/include"
+echo "Installed static lib to: $GL4ES_PREFIX/lib/libGL.a"
+echo "Headers installed under: $GL4ES_PREFIX/include"
 
 echo "=== gl4es static build complete ==="
