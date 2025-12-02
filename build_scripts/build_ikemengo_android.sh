@@ -397,7 +397,7 @@ build_ikemen_android() {
 	# Flags for FFmpeg + libxmp + SDL2 (same idea as build/build.sh)
 	local deps_cflags
 	local deps_libs
-	deps_cflags="$($pc --cflags libavformat libavcodec libavutil libswscale libswresample libavfilter sdl2)"
+	deps_cflags="$($pc --cflags libavformat libavcodec libavutil libswscale libswresample libavfilter sdl2 gl)"
 	deps_libs="$($pc --libs libavformat libavcodec libavutil libswscale libswresample libavfilter sdl2)"
 
 	# 3) Go / CGO setup
@@ -407,10 +407,11 @@ build_ikemen_android() {
 	export GOEXPERIMENT=arenas
 
 	# C flags: deps + gl4es headers + libxmp headers + Android
-	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC -DNOX11"
+	X11_Mocks="-DDisplay=void -DXVisualInfo=void -DXID=long -DWindow=long -DPixmap=long -DFont=long -DBool=int -DStatus=int -DColormap=long"
+	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC -DNOX11 -DGLX_STUBS $X11_Mocks"
 
 	# Linker flags: shared deps + Android libs + static libxmp gl4es
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a -lEGL -lGLESv2 -landroid -llog"
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a -lEGL -lGLESv2 -landroid -llog -lm -ldl"
 
 	# 4) Build as c-shared for JNI, add `-s -w` in ldflags to strip debug symbols
 	local out_so="$JNI_DIR/libikemen.so"
