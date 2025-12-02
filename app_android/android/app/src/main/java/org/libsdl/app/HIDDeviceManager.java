@@ -685,7 +685,7 @@ public class HIDDeviceManager {
     /////////////// Native methods
     //////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    private native void HIDDeviceRegisterCallback();
+    /* private native void HIDDeviceRegisterCallback();
     private native void HIDDeviceReleaseCallback();
 
     native void HIDDeviceConnected(int deviceID, String identifier, int vendorId, int productId, String serial_number, int release_number, String manufacturer_string, String product_string, int interface_number, int interface_class, int interface_subclass, int interface_protocol);
@@ -694,5 +694,46 @@ public class HIDDeviceManager {
     native void HIDDeviceDisconnected(int deviceID);
 
     native void HIDDeviceInputReport(int deviceID, byte[] report);
-    native void HIDDeviceFeatureReport(int deviceID, byte[] report);
+    native void HIDDeviceFeatureReport(int deviceID, byte[] report);*/
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //  Stubbed native methods (we don't use SDL's HID/gamepad JNI on this build)
+    //  This avoids UnsatisfiedLinkError from missing JNI symbols in libSDL2.so.
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    private void HIDDeviceRegisterCallback() {
+        // No-op: in the official SDL build this registers callbacks with native code.
+    }
+
+    private void HIDDeviceReleaseCallback() {
+        // No-op: would deregister callbacks on shutdown.
+    }
+
+    void HIDDeviceConnected(int deviceID, String identifier, int vendorId, int productId,
+                            String serial_number, int release_number,
+                            String manufacturer_string, String product_string,
+                            int interface_number, int interface_class,
+                            int interface_subclass, int interface_protocol) {
+        // No-op: would normally notify native SDL about a new HID device.
+    }
+
+    void HIDDeviceOpenPending(int deviceID) {
+        // No-op
+    }
+
+    void HIDDeviceOpenResult(int deviceID, boolean opened) {
+        // No-op
+    }
+
+    void HIDDeviceDisconnected(int deviceID) {
+        // No-op
+    }
+
+    void HIDDeviceInputReport(int deviceID, byte[] report) {
+        // No-op
+    }
+
+    void HIDDeviceFeatureReport(int deviceID, byte[] report) {
+        // No-op
+    }
 }
