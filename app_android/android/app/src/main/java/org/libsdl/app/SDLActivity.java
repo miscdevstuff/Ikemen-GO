@@ -274,7 +274,7 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
             // "SDL2_mixer",
             // "SDL2_net",
             // "SDL2_ttf",
-            "main"
+            "ikemen" // Android related change, our .so file name is libikemen.so not libmain.so
         };
     }
 

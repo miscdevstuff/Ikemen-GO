@@ -1,4 +1,4 @@
-package com.ikemenmobile
+/* package com.ikemenmobile
 
 import android.util.Log
 
@@ -17,8 +17,6 @@ object IkemenNative {
         }
     }
 
-    /**
-     * Native entrypoint exported by your Go/CGO code.
-     */
+    // Native entrypoint exported by your Go/CGO code.
     external fun runIkemen(basePath: String)
-}
+} */
