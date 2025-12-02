@@ -18,6 +18,7 @@ import (
     "unsafe"
 )
 
+//export SDL_main
 // SDL calls this instead of main() on Android.
 // It runs on the dedicated SDL thread created by SDLActivity.
 func SDL_main(argc C.int, argv **C.char) C.int {
