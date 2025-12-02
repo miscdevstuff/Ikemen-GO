@@ -52,3 +52,20 @@ echo "Installed static lib to: $GL4ES_PREFIX/lib/libGL.a"
 echo "Headers installed under: $GL4ES_PREFIX/include"
 
 echo "=== gl4es static build complete ==="
+
+# Create a pkg-config file so "pkg-config gl" works (for go-gl/gl)
+mkdir -p "$GL4ES_PREFIX/lib/pkgconfig"
+cat > "$GL4ES_PREFIX/lib/pkgconfig/gl.pc" << EOF
+prefix=$GL4ES_PREFIX
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: gl
+Description: OpenGL via gl4es
+Version: 1.0
+Libs: -L\${libdir} -lGL
+Cflags: -I\${includedir}
+EOF
+
+echo "Created pkg-config file: $GL4ES_PREFIX/lib/pkgconfig/gl.pc"
