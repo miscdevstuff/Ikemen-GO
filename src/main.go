@@ -156,6 +156,16 @@ func RunGameAndroid(basePath string) {
     println("[Ikemen] RunGameAndroid: locking OS thread")
     runtime.LockOSThread()
     defer func() {
+        if r := recover(); r != nil {
+            // Print to stdout (ADB logcat should see this)
+            println("[Ikemen] PANIC:", r)
+
+            // Write through SDL Java debug logger
+            C.SDL_AndroidLogWrite(C.ANDROID_LOG_ERROR,
+                C.CString("Ikemen-Crash"),
+                C.CString(fmt.Sprintf("%v", r)),
+            )
+        }
         println("[Ikemen] RunGameAndroid: unlocking OS thread / returning")
         runtime.UnlockOSThread()
     }()
