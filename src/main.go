@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -150,39 +151,71 @@ func RunGame() {
 	}
 }
 
-// RunGameAndroid is the entrypoint we call from JNI on Android.
+// RunGameAndroid is the entrypoint we call from SDL_main on Android.
 // It locks the calling thread for the whole lifetime of the game loop.
 func RunGameAndroid(basePath string) {
     println("[Ikemen] RunGameAndroid: locking OS thread")
     runtime.LockOSThread()
     defer func() {
         if r := recover(); r != nil {
-            // Print to stdout (ADB logcat should see this)
-            println("[Ikemen] PANIC:", r)
+            // Panic info goes to logcat
+            fmt.Println("[Ikemen] PANIC:", r)
 
-            // Write through SDL Java debug logger
-            C.SDL_AndroidLogWrite(C.ANDROID_LOG_ERROR,
-                C.CString("Ikemen-Crash"),
-                C.CString(fmt.Sprintf("%v", r)),
-            )
+            // Try to append panic info to boot log as well
+            if basePath != "" {
+                if f, err := os.OpenFile(
+                    filepath.Join(basePath, "ikemen_boot.log"),
+                    os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+                    0o644,
+                ); err == nil {
+                    fmt.Fprintf(f, "PANIC: %v\n", r)
+                    f.Close()
+                }
+            }
         }
         println("[Ikemen] RunGameAndroid: unlocking OS thread / returning")
         runtime.UnlockOSThread()
     }()
 
+    // Open boot log
+    var logFile *os.File
     if basePath != "" {
-        if err := os.Chdir(basePath); err != nil {
-            fmt.Println("[Ikemen] RunGameAndroid: chdir to basePath failed:", err)
+        if f, err := os.OpenFile(
+            filepath.Join(basePath, "ikemen_boot.log"),
+            os.O_CREATE|os.O_WRONLY|os.O_TRUNC,
+            0o644,
+        ); err == nil {
+            logFile = f
+            fmt.Fprintln(logFile, "==== Ikemen Android boot ====")
+            fmt.Fprintln(logFile, "basePath:", basePath)
         } else {
-            if wd, err := os.Getwd(); err == nil {
-                fmt.Println("[Ikemen] RunGameAndroid: cwd =", wd)
-            }
+            fmt.Println("[Ikemen] RunGameAndroid: failed to open boot log:", err)
+        }
+    }
+    if logFile != nil {
+        defer logFile.Close()
+    }
+
+    logf := func(msg string) {
+        fmt.Println(msg)
+        if logFile != nil {
+            fmt.Fprintln(logFile, msg)
         }
     }
 
-    println("[Ikemen] RunGameAndroid: calling RunGame()")
+    logf("[Ikemen] RunGameAndroid: basePath = " + basePath)
+
+    if basePath != "" {
+        if err := os.Chdir(basePath); err != nil {
+            logf("[Ikemen] RunGameAndroid: chdir(basePath) failed: " + err.Error())
+        } else if wd, err := os.Getwd(); err == nil {
+            logf("[Ikemen] RunGameAndroid: cwd = " + wd)
+        }
+    }
+
+    logf("[Ikemen] RunGameAndroid: calling RunGame()")
     RunGame()
-    println("[Ikemen] RunGameAndroid: RunGame() returned")
+    logf("[Ikemen] RunGameAndroid: RunGame() returned")
 }
 
 func main() {

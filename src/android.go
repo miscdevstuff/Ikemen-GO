@@ -22,24 +22,26 @@ import (
 // SDL calls this instead of main() on Android.
 // It runs on the dedicated SDL thread created by SDLActivity.
 func SDL_main(argc C.int, argv **C.char) C.int {
-    // For now: hardcoded base path in app-private storage.
-    // Later we can switch to a user-modifiable /sdcard/IkemenMobile, etc.
+    argcGo := int(argc)
+    argvSlice := unsafe.Slice(argv, argcGo)
+
+    // Fallback if Java didn't pass anything
     base := "/storage/emulated/0/Android/data/com.ikemenmobile/files"
+    if argcGo > 1 && argvSlice[1] != nil {
+        base = C.GoString(argvSlice[1])
+    }
 
     // Log via Android logcat
     {
-        msg := C.CString("SDL_main(): entering Go, calling RunGameAndroid")
+        msg := C.CString("SDL_main(): entering Go, base=" + base)
         C.ikm_log(msg)
         C.free(unsafe.Pointer(msg))
     }
 
-    // Optional: also log to stdout (often ends up in logcat too)
+    // Also log to stdout (shows up under "E/Go" in logcat)
     fmt.Println("[Ikemen] SDL_main(): base path =", base)
 
-    // Let the Go-side Android entrypoint handle:
-    //   - LockOSThread
-    //   - chdir(base)
-    //   - RunGame()
+    // Hand off to Go-side Android entrypoint
     RunGameAndroid(base)
 
     {
@@ -48,6 +50,5 @@ func SDL_main(argc C.int, argv **C.char) C.int {
         C.free(unsafe.Pointer(msg))
     }
 
-    // SDL thread will terminate after this.
     return 0
 }
