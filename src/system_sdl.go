@@ -18,6 +18,8 @@ type Window struct {
 	x, y, w, h int
 	fullscreen bool
 	closeflag  bool
+
+	glContext sdl.GLContext
 }
 
 var globalSDLWindow *sdl.Window
@@ -175,6 +177,34 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 
 	ret := &Window{window, title, int(x), int(y), w, h, fullscreen, false}
 	return ret, err
+}
+
+// Create & bind GL context when using an OpenGL render mode.
+func (w *Window) InitGLContextIfNeeded(renderMode string) error {
+	// Only care about OpenGL modes (2.1 / 3.2)
+	if !strings.Contains(renderMode, "OpenGL") {
+		return nil
+	}
+
+	ctx, err := w.GLCreateContext()
+	if err != nil {
+		return fmt.Errorf("GLCreateContext failed: %w", err)
+	}
+
+	if err := w.GLMakeCurrent(ctx); err != nil {
+		return fmt.Errorf("SDL_GL_MakeCurrent failed: %w", err)
+	}
+
+	w.glContext = ctx
+
+	// Optional but useful: log actual GL version (GL4ES will report a desktop GL version)
+	if major, err1 := sdl.GLGetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION); err1 == nil {
+		if minor, err2 := sdl.GLGetAttribute(sdl.GL_CONTEXT_MINOR_VERSION); err2 == nil {
+			fmt.Printf("[Ikemen] GL context version %d.%d\n", major, minor)
+		}
+	}
+
+	return nil
 }
 
 func (w *Window) SwapBuffers() {
@@ -398,10 +428,10 @@ func (w *Window) shouldClose() bool {
 
 func (w *Window) Close() {
 	if w.Window != nil {
-	    // Dont destroy window on android manually, let sdl take care of that
-	    if runtime.GOOS != "android" {
-	        w.Window.Destroy()
-	    }
+		// Dont destroy window on android manually, let sdl take care of that
+		if runtime.GOOS != "android" {
+			w.Window.Destroy()
+		}
 		w.Window = nil
 	}
 	sdl.Quit()

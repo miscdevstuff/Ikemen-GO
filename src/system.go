@@ -337,11 +337,10 @@ func (s *System) init(w, h int32) *lua.LState {
 	s.window, err = s.newWindow(int(s.scrrect[2]), int(s.scrrect[3]))
 	chk(err)
 
-	if strings.Contains(s.cfg.Video.RenderMode, "OpenGL") && runtime.GOOS != "android" {
-		if _, err := s.window.GLCreateContext(); err != nil {
-			s.errLog.Fatalf("Could not initialize context :( Reason? %s", err)
-		}
-	}
+	// Initialize GL context for OpenGL modes
+    if err := s.window.InitGLContextIfNeeded(s.cfg.Video.RenderMode); err != nil {
+    	s.errLog.Fatalf("Could not initialize GL context: %v", err)
+    }
 
 	exePath, err := os.Executable()
 	if err != nil {
@@ -399,6 +398,7 @@ func (s *System) init(w, h int32) *lua.LState {
 	// PS: The "\x00" is what is know as Null Terminator.
 
 	// Now we proceed to init the render.
+	// Keep vulkan disabled here until vulkan renderer is built
 	/* if s.cfg.Video.RenderMode == "Vulkan 1.3" {
 		gfx = &Renderer_VK{}
 		gfxFont = &FontRenderer_VK{}
