@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	"runtime"
 	"strings"
 
 	"github.com/veandco/go-sdl2/sdl"
@@ -18,6 +19,8 @@ type Window struct {
 	fullscreen bool
 	closeflag  bool
 }
+
+var globalSDLWindow *sdl.Window
 
 func (s *System) newWindow(w, h int) (*Window, error) {
 	var err error
@@ -51,24 +54,42 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 
 	var windowFlags uint32 = sdl.WINDOW_INPUT_FOCUS
 
-	if sys.cfg.Video.RenderMode == "OpenGL 3.2" {
-		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_CORE)
-		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 3)
-		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 2)
-		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, 1)
-		windowFlags |= sdl.WINDOW_OPENGL
-	} else if sys.cfg.Video.RenderMode == "OpenGL 2.1" {
+	if runtime.GOOS == "android" {
+		// --- ANDROID PATH: Force GLES2 context for gl4es ---
+		// gl4es will emulate desktop GL 2.1 on top of GLES2.
+
+		// Ask SDL for an ES context
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_ES)
 		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 2)
-		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 1)
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 0)
+
+		// No forward-compatible / core flags on ES
+		_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_FLAGS, 0)
+
+		// Always use OpenGL (GLES) window; Vulkan is off on Android for us
 		windowFlags |= sdl.WINDOW_OPENGL
+		// Android is always fullscreen; SDL will manage real size
+		windowFlags |= sdl.WINDOW_FULLSCREEN_DESKTOP
 	} else {
-		windowFlags |= sdl.WINDOW_VULKAN
-		// Ensure core profile is NOT set for Vulkan
-		if err := sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, 0); err != nil {
-			return nil, err
-		}
-		if err := sdl.GLSetAttribute(sdl.GL_CONTEXT_FLAGS, 0); err != nil {
-			return nil, err
+		if sys.cfg.Video.RenderMode == "OpenGL 3.2" {
+			_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_CORE)
+			_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 3)
+			_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 2)
+			_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, 1)
+			windowFlags |= sdl.WINDOW_OPENGL
+		} else if sys.cfg.Video.RenderMode == "OpenGL 2.1" {
+			_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 2)
+			_ = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 1)
+			windowFlags |= sdl.WINDOW_OPENGL
+		} else {
+			windowFlags |= sdl.WINDOW_VULKAN
+			// Ensure core profile is NOT set for Vulkan
+			if err := sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, 0); err != nil {
+				return nil, err
+			}
+			if err := sdl.GLSetAttribute(sdl.GL_CONTEXT_FLAGS, 0); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -93,15 +114,38 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		title = "Ikemen GO"
 	}
 
-	window, err = sdl.CreateWindow(
-		title,
-		sdl.WINDOWPOS_CENTERED,
-		sdl.WINDOWPOS_CENTERED,
-		w2, h2,
-		windowFlags,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create window: %w", err)
+	// Replace w2/h2 with the actual display resolution on android if needed:
+	// if runtime.GOOS == "android" {
+	//     w2, h2 = mode.W, mode.H
+	// }
+
+	// --- Create / reuse SDL window (single window per process) ---
+	if globalSDLWindow == nil {
+		fmt.Println("[Ikemen] newWindow(): creating SDL window",
+			"title=", title, "w2=", w2, "h2=", h2, "fullscreen=", fullscreen)
+
+		win, err := sdl.CreateWindow(
+			title,
+			sdl.WINDOWPOS_CENTERED,
+			sdl.WINDOWPOS_CENTERED,
+			w2, h2,
+			windowFlags,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create window: %w", err)
+		}
+		globalSDLWindow = win
+	} else {
+		fmt.Println("[Ikemen] newWindow(): reusing existing SDL window")
+	}
+
+	window = globalSDLWindow
+
+	// Log window ID so we can see what's going on in logcat / boot log
+	if id, errID := window.GetID(); errID == nil {
+		fmt.Println("[Ikemen] newWindow(): window ID =", id)
+	} else {
+		fmt.Println("[Ikemen] newWindow(): GetID error:", errID)
 	}
 
 	// Set window attributes
@@ -346,7 +390,10 @@ func (w *Window) shouldClose() bool {
 
 func (w *Window) Close() {
 	if w.Window != nil {
-		w.Window.Destroy()
+	    // Dont destroy window on android manually, let sdl take care of that
+	    if runtime.GOOS != "android" {
+	        w.Window.Destroy()
+	    }
 		w.Window = nil
 	}
 	sdl.Quit()
