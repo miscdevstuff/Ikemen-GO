@@ -213,6 +213,11 @@ func RunGameAndroid(basePath string) {
         }
     }
 
+    // Force OpenGL renderer on Android for now; other modes (e.g., Vulkan/GL3) are not supported.
+    if runtime.GOOS == "android" {
+        sys.cfg.Video.RenderMode = "OpenGL 2.1"
+    }
+
     logf("[Ikemen] RunGameAndroid: calling RunGame()")
     RunGame()
     logf("[Ikemen] RunGameAndroid: RunGame() returned")

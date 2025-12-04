@@ -20,7 +20,6 @@ import (
 
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/speaker"
-
 	//glfont "github.com/ikemen-engine/glfont"
 	lua "github.com/yuin/gopher-lua"
 )
@@ -338,7 +337,7 @@ func (s *System) init(w, h int32) *lua.LState {
 	s.window, err = s.newWindow(int(s.scrrect[2]), int(s.scrrect[3]))
 	chk(err)
 
-	if strings.Contains(s.cfg.Video.RenderMode, "OpenGL") {
+	if strings.Contains(s.cfg.Video.RenderMode, "OpenGL") && runtime.GOOS != "android" {
 		if _, err := s.window.GLCreateContext(); err != nil {
 			s.errLog.Fatalf("Could not initialize context :( Reason? %s", err)
 		}
@@ -406,15 +405,11 @@ func (s *System) init(w, h int32) *lua.LState {
 	} else */
 	if s.cfg.Video.RenderMode == "OpenGL 2.1" {
 		gfx = &Renderer_GL21{}
-		//gfxFont = &FontRenderer_GL21{}
+		gfxFont = &FontRenderer_GL21{}
 	} else {
 		gfx = &Renderer_GL32{}
-		//gfxFont = &FontRenderer_GL32{}
+		gfxFont = &FontRenderer_GL32{}
 	}
-
-	// For now just panic
-	gfx = nil
-	gfxFont = nil
 	gfx.Init()
 	gfxFont.Init(gfx)
 	gfx.BeginFrame(false)
