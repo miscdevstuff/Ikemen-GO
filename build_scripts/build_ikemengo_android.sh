@@ -304,14 +304,14 @@ build_sdl2_android() {
 		exit 1
 	fi
 
-	LDFLAGS="-L$ANDROID_SYSROOT/usr/lib/$ANDROID_TRIPLE/$ANDROID_API -lOpenSLES -landroid -llog" \
-		LIBS="-lOpenSLES -llog -landroid" \
+	LDFLAGS="-L$ANDROID_SYSROOT/usr/lib/$ANDROID_TRIPLE/$ANDROID_API -landroid -llog" \
+		LIBS="-llog -landroid" \
 		./configure \
 		--host="$ANDROID_TRIPLE" \
 		--prefix="$SDL2_PREFIX" \
 		--enable-shared \
 		--disable-static \
-		--enable-audio \
+		--disable-audio \
 		--enable-video-opengl \
 		--disable-hidapi \
 		CC="$CC" \
