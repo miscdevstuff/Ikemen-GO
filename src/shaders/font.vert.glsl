@@ -1,3 +1,7 @@
+#ifdef GL_ES
+precision highp float;
+precision mediump int;
+#endif
 #if __VERSION__ >= 450
 layout(location = 0) in vec2 vert;
 layout(location = 1) in vec2 vertTexCoord;

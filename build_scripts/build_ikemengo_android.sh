@@ -370,6 +370,10 @@ prepare_ikemen_assets_zip() {
 		echo "  - Copying engine external/ from main repo"
 		cp -a "$REPO_ROOT/external" "$TEMP_ASSETS_ROOT/external"
 	fi
+	if [[ -d "$REPO_ROOT/font" ]]; then
+        echo "  - Copying engine font/ from main repo"
+        cp -a "$REPO_ROOT/font" "$TEMP_ASSETS_ROOT/font"
+    fi
 
 	# 2) Shallow-clone Elecbyte screenpack and merge its content
 	if [[ ! -d "$SCREENPACK_DIR/.git" ]]; then

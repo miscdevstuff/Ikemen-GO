@@ -1,3 +1,7 @@
+#ifdef GL_ES
+precision mediump float;
+precision mediump int;
+#endif
 #if __VERSION__ >= 130
 #define COMPAT_VARYING in
 #define COMPAT_ATTRIBUTE in

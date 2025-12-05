@@ -1,3 +1,7 @@
+#ifdef GL_ES
+precision highp float;
+precision mediump int;
+#endif
 #if __VERSION__ >= 450
 layout(binding = 0) uniform UniformBufferObject {
 mat4 modelview, projection;
