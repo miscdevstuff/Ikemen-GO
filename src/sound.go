@@ -33,8 +33,8 @@ import (
 )
 
 const (
-	audioOutLen          = 16384
-	audioFrequency       = 48000
+	audioOutLen          = 9216
+	audioFrequency       = 22050
 	audioPrecision       = 4
 	audioResampleQuality = 1
 	audioSoundFont       = "sound/soundfont.sf2" // default path for MIDI soundfont
