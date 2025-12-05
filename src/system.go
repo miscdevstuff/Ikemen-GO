@@ -415,7 +415,13 @@ func (s *System) init(w, h int32) *lua.LState {
 	gfx.BeginFrame(false)
 	// And the audio.
 	speaker.Init(beep.SampleRate(sys.cfg.Sound.SampleRate), audioOutLen)
-	speaker.Play(NewNormalizer(s.soundMixer))
+	if runtime.GOOS == "android" {
+		// Android: Direct mixing (Fast)
+		speaker.Play(s.soundMixer)
+	} else {
+		// Desktop: Normalized mixing (High Quality)
+		speaker.Play(NewNormalizer(s.soundMixer))
+	}
 	l := lua.NewState()
 	l.Options.IncludeGoStackTrace = true
 	l.OpenLibs()

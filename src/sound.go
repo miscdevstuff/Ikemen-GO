@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	audioOutLen          = 4096
+	audioOutLen          = 16384
 	audioFrequency       = 48000
 	audioPrecision       = 4
 	audioResampleQuality = 1
@@ -1012,6 +1012,20 @@ type SoundEffect struct {
 
 func (s *SoundEffect) Stream(samples [][2]float64) (n int, ok bool) {
 	// TODO: Test mugen panning in relation to PanningWidth and zoom settings
+	// FAST PATH: Android Optimization
+	// Skip stereo panning and volume ramping to save CPU
+	if runtime.GOOS == "android" {
+		n, ok = s.streamer.Stream(samples)
+		// Simple volume multiplication
+		vol := float64(s.volume / 256)
+		for i := range samples[:n] {
+			samples[i][0] *= vol
+			samples[i][1] *= vol
+		}
+		return n, ok
+	}
+
+	// DESKTOP PATH: High Quality
 	lv, rv := s.volume, s.volume
 	if sys.cfg.Sound.StereoEffects && (s.x != nil || s.p != 0) {
 		var r float32
