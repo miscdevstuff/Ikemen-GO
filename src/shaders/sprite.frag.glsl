@@ -83,9 +83,12 @@ void main(void) {
 				c.a = 1.0;
 			}
 		}
-		if (hue != 0) {
+
+		// float-safe comparison
+		if (hue != 0.0) {
 			c.rgb = hue_shift(c.rgb,hue);			
 		}
+
 		if (neg) c.rgb = neg_base - c.rgb;
 		c.rgb = mix(c.rgb, vec3((c.r + c.g + c.b) / 3.0), gray) + final_add;
 		c *= final_mul;

@@ -37,6 +37,7 @@ uniform float intensityScale;
 uniform bool isLUT;
 COMPAT_VARYING vec2 texcoord;
 #endif
+
 const int cLambertian = 0;
 const int cGGX = 1;
 const int cCharlie = 2;
@@ -45,34 +46,35 @@ const int cCharlie = 2;
 vec3 uvToXYZ(int face, vec2 uv)
 {
     if(face == 0)
-        return vec3(     1.f,   uv.y,    -uv.x);
+        return vec3(     1.0,   uv.y,    -uv.x);
 
     else if(face == 1)
-        return vec3(    -1.f,   uv.y,     uv.x);
+        return vec3(    -1.0,   uv.y,     uv.x);
 
     else if(face == 2)
-        return vec3(   +uv.x,   -1.f,    +uv.y);
+        return vec3(   +uv.x,   -1.0,    +uv.y);
 
     else if(face == 3)
-        return vec3(   +uv.x,    1.f,    -uv.y);
+        return vec3(   +uv.x,    1.0,    -uv.y);
 
     else if(face == 4)
-        return vec3(   +uv.x,   uv.y,      1.f);
+        return vec3(   +uv.x,   uv.y,      1.0);
 
-    else {//if(face == 5)
-        return vec3(    -uv.x,  +uv.y,     -1.f);}
+    else { // if(face == 5)
+        return vec3(    -uv.x,  +uv.y,     -1.0);
+    }
 }
 
 vec2 dirToUV(vec3 dir)
 {
     return vec2(
-            0.5f + 0.5f * atan(dir.z, dir.x) / MATH_PI,
-            1.f - acos(dir.y) / MATH_PI);
+            0.5 + 0.5 * atan(dir.z, dir.x) / MATH_PI,
+            1.0 - acos(dir.y) / MATH_PI);
 }
 
 float saturate(float v)
 {
-    return clamp(v, 0.0f, 1.0f);
+    return clamp(v, 0.0, 1.0);
 }
 
 struct MicrofacetDistributionSample
@@ -122,20 +124,17 @@ MicrofacetDistributionSample Lambertian(vec2 xi, float roughness)
     MicrofacetDistributionSample lambertian;
 
     // Cosine weighted hemisphere sampling
-    // http://www.pbr-book.org/3ed-2018/Monte_Carlo_Integration/2D_Sampling_with_Multidimensional_Transformations.html#Cosine-WeightedHemisphereSampling
     lambertian.cosTheta = sqrt(1.0 - xi.y);
-    lambertian.sinTheta = sqrt(xi.y); // equivalent to `sqrt(1.0 - cosTheta*cosTheta)`;
+    lambertian.sinTheta = sqrt(xi.y);
     lambertian.phi = 2.0 * MATH_PI * xi.x;
 
-    lambertian.pdf = lambertian.cosTheta / MATH_PI; // evaluation for solid angle, therefore drop the sinTheta
+    lambertian.pdf = lambertian.cosTheta / MATH_PI; // solid angle pdf
 
     return lambertian;
 }
+
 #if __VERSION__ >= 130
-// Hammersley Points on the Hemisphere
-// CC BY 3.0 (Holger Dammertz)
-// http://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
-// with adapted interface
+// Hammersley Points on the Hemisphere (uint-based version)
 float radicalInverse_VdC(uint bits)
 {
     bits = (bits << 16u) | (bits >> 16u);
@@ -149,24 +148,18 @@ vec2 hammersley2d(int i, int N) {
     return vec2(float(i)/float(N), radicalInverse_VdC(uint(i)));
 }
 #else
-float radicalInverse(int n, int base) {
-    float invBase = 1.0 / float(base);
-    float reversedDigits = 0.0;
-    float invBaseN = 1.0;
-    while (n > 0) {
-        int nextDigit = n % base;
-        reversedDigits = reversedDigits * base + float(nextDigit);
-        n = n / base;
-        invBaseN *= invBase;
-    }
-    return reversedDigits * invBaseN;
-}
+// GLES2-safe approximation: no integer modulo, no loops with `%`
 vec2 hammersley2d(int i, int N) {
-    return vec2(float(i)/float(N), radicalInverse(i, 2));
+    float fi   = float(i);
+    float invN = 1.0 / float(N);
+    float x    = fi * invN;
+    // simple hash for y, good enough for importance sampling
+    float y    = fract(sin(fi * 12.9898) * 43758.5453);
+    return vec2(x, y);
 }
 #endif
+
 // TBN generates a tangent bitangent normal coordinate frame from the normal
-// (the normal must be normalized)
 mat3 generateTBN(vec3 normal)
 {
     vec3 bitangent = vec3(0.0, 1.0, 0.0);
@@ -191,35 +184,24 @@ mat3 generateTBN(vec3 normal)
 
     return mat3(tangent, bitangent, normal);
 }
+
 // getImportanceSample returns an importance sample direction with pdf in the .w component
 vec4 getImportanceSample(int sampleIndex, vec3 N, float roughness)
 {
-    // generate a quasi monte carlo point in the unit square [0.1)^2
+    // generate a quasi monte carlo point in the unit square [0,1)^2
     vec2 xi = hammersley2d(sampleIndex, sampleCount);
 
     MicrofacetDistributionSample importanceSample;
 
-    // generate the points on the hemisphere with a fitting mapping for
-    // the distribution (e.g. lambertian uses a cosine importance)
     if(distribution == cLambertian)
     {
         importanceSample = Lambertian(xi, roughness);
     }
-    
     else if(distribution == cGGX)
     {
-        // Trowbridge-Reitz / GGX microfacet model (Walter et al)
-        // https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.html
         importanceSample = GGX(xi, roughness);
     }
-    /*
-    else if(distribution == cCharlie)
-    {
-        importanceSample = Charlie(xi, roughness);
-    }
-*/
-    // transform the hemisphere sample to the normal coordinate frame
-    // i.e. rotate the hemisphere to the normal direction
+
     vec3 localSpaceDirection = normalize(vec3(
         importanceSample.sinTheta * cos(importanceSample.phi), 
         importanceSample.sinTheta * sin(importanceSample.phi), 
@@ -232,67 +214,33 @@ vec4 getImportanceSample(int sampleIndex, vec3 N, float roughness)
 }
 
 // Mipmap Filtered Samples (GPU Gems 3, 20.4)
-// https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-20-gpu-based-importance-sampling
-// https://cgg.mff.cuni.cz/~jaroslav/papers/2007-sketch-fis/Final_sap_0073.pdf
 float computeLod(float pdf)
 {
-    // // Solid angle of current sample -- bigger for less likely samples
-    // float omegaS = 1.0 / (float(u_sampleCount) * pdf);
-    // // Solid angle of texel
-    // // note: the factor of 4.0 * MATH_PI 
-    // float omegaP = 4.0 * MATH_PI / (6.0 * float(width) * float(width));
-    // // Mip level is determined by the ratio of our sample's solid angle to a texel's solid angle 
-    // // note that 0.5 * log2 is equivalent to log4
-    // float lod = 0.5 * log2(omegaS / omegaP);
-
-    // babylon introduces a factor of K (=4) to the solid angle ratio
-    // this helps to avoid undersampling the environment map
-    // this does not appear in the original formulation by Jaroslav Krivanek and Mark Colbert
-    // log4(4) == 1
-    // lod += 1.0;
-
-    // We achieved good results by using the original formulation from Krivanek & Colbert adapted to cubemaps
-
-    // https://cgg.mff.cuni.cz/~jaroslav/papers/2007-sketch-fis/Final_sap_0073.pdf
     float lod = 0.5 * log2( 6.0 * float(width) * float(width) / (float(sampleCount) * pdf));
-
-
     return lod;
 }
 
 vec3 filterColor(vec3 N)
 {
-    vec3 color = vec3(0.f);
-    float weight = 0.0f;
+    vec3 color = vec3(0.0);
+    float weight = 0.0;
 
     for(int i = 0; i < sampleCount; ++i)
     {
         vec4 importanceSample = getImportanceSample(i, N, roughness);
 
-        vec3 H = vec3(importanceSample.xyz);
+        vec3 H = importanceSample.xyz;
         float pdf = importanceSample.w;
 
-        // mipmap filtered samples (GPU Gems 3, 20.4)
         float lod = computeLod(pdf);
-
-        // apply the bias to the lod
-        //lod += u_lodBias;
 
         if(distribution == cLambertian)
         {
-            // sample lambertian at a lower resolution to avoid fireflies
             vec3 lambertian = COMPAT_TEXTURE_CUBE_LOD(cubeMap, H, lod).rgb * intensityScale;
-
-            //// the below operations cancel each other out
-            // lambertian *= NdotH; // lamberts law
-            // lambertian /= pdf; // invert bias from importance sampling
-            // lambertian /= MATH_PI; // convert irradiance to radiance https://seblagarde.wordpress.com/2012/01/08/pi-or-not-to-pi-in-game-lighting-equation/
-
             color += lambertian;
         }
         else if(distribution == cGGX || distribution == cCharlie)
         {
-            // Note: reflect takes incident vector.
             vec3 V = N;
             vec3 L = normalize(reflect(-V, H));
             float NdotL = dot(N, L);
@@ -301,9 +249,7 @@ vec3 filterColor(vec3 N)
             {
                 if(roughness == 0.0)
                 {
-                    // without this the roughness=0 lod is too high
-                    //lod = u_lodBias;
-                    lod = 0;
+                    lod = 0.0;
                 }
                 vec3 sampleColor = COMPAT_TEXTURE_CUBE_LOD(cubeMap, L, lod).rgb * intensityScale;
                 color += sampleColor * NdotL;
@@ -312,7 +258,7 @@ vec3 filterColor(vec3 N)
         }
     }
 
-    if(weight != 0.0f)
+    if(weight != 0.0)
     {
         color /= weight;
     }
@@ -325,7 +271,6 @@ vec3 filterColor(vec3 N)
 }
 
 // From the filament docs. Geometric Shadowing function
-// https://google.github.io/filament/Filament.html#toc4.4.2
 float V_SmithGGXCorrelated(float NoV, float NoL, float roughness) {
     float a2 = pow(roughness, 4.0);
     float GGXV = NoL * sqrt(NoV * NoV * (1.0 - a2) + a2);
@@ -334,30 +279,19 @@ float V_SmithGGXCorrelated(float NoV, float NoL, float roughness) {
 }
 
 // Compute LUT for GGX distribution.
-// See https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
 vec3 LUT(float NdotV, float roughness)
 {
-    // Compute spherical view vector: (sin(phi), 0, cos(phi))
     vec3 V = vec3(sqrt(1.0 - NdotV * NdotV), 0.0, NdotV);
-
-    // The macro surface normal just points up.
     vec3 N = vec3(0.0, 0.0, 1.0);
 
-    // To make the LUT independant from the material's F0, which is part of the Fresnel term
-    // when substituted by Schlick's approximation, we factor it out of the integral,
-    // yielding to the form: F0 * I1 + I2
-    // I1 and I2 are slighlty different in the Fresnel term, but both only depend on
-    // NoL and roughness, so they are both numerically integrated and written into two channels.
     float A = 0.0;
     float B = 0.0;
     float C = 0.0;
 
     for(int i = 0; i < sampleCount; ++i)
     {
-        // Importance sampling, depending on the distribution.
         vec4 importanceSample = getImportanceSample(i, N, roughness);
         vec3 H = importanceSample.xyz;
-        // float pdf = importanceSample.w;
         vec3 L = normalize(reflect(-V, H));
 
         float NdotL = saturate(L.z);
@@ -367,11 +301,6 @@ vec3 LUT(float NdotV, float roughness)
         {
             if (distribution == cGGX)
             {
-                // LUT for GGX distribution.
-
-                // Taken from: https://bruop.github.io/ibl
-                // Shadertoy: https://www.shadertoy.com/view/3lXXDB
-                // Terms besides V are from the GGX PDF we're dividing by.
                 float V_pdf = V_SmithGGXCorrelated(NdotV, NdotL, roughness) * VdotH * NdotL / NdotH;
                 float Fc = pow(1.0 - VdotH, 5.0);
                 A += (1.0 - Fc) * V_pdf;
@@ -381,19 +310,15 @@ vec3 LUT(float NdotV, float roughness)
         }
     }
 
-    // The PDF is simply pdf(v, h) -> NDF * <nh>.
-    // To parametrize the PDF over l, use the Jacobian transform, yielding to: pdf(v, l) -> NDF * <nh> / 4<vh>
-    // Since the BRDF divide through the PDF to be normalized, the 4 can be pulled out of the integral.
     return vec3(4.0 * A, 4.0 * B, 4.0 * 2.0 * MATH_PI * C) / float(sampleCount);
 }
 
 void main()
 {
-    vec3 color = vec3(0);
+    vec3 color = vec3(0.0);
 
     if(!isLUT){
-        vec2 newUV = texcoord ;
-
+        vec2 newUV = texcoord;
         newUV = newUV*2.0-1.0;
 
         vec3 scan = uvToXYZ(currentFace, newUV);
@@ -404,7 +329,6 @@ void main()
         color = filterColor(direction);
 
         FragColor.a = 1.0;
-        
         FragColor.rgb = color;
     }else{
         color = LUT(texcoord.x, texcoord.y);
@@ -412,6 +336,4 @@ void main()
         FragColor.a = 1.0;
         return;
     }
-
-    
 }

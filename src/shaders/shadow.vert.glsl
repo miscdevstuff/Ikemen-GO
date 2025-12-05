@@ -87,8 +87,9 @@ COMPAT_ATTRIBUTE vec4 weights_1;
 COMPAT_VARYING float vColor;
 COMPAT_VARYING vec2 texcoord;
 
+// *** patched: make comparison float-safe ***
+#define useJoint0 (weights_0.x + weights_0.y + weights_0.z + weights_0.w + weights_1.x + weights_1.y + weights_1.z + weights_1.w > 0.0)
 
-#define useJoint0 weights_0.x+weights_0.y+weights_0.z+weights_0.w+weights_1.x+weights_1.y+weights_1.z+weights_1.w>0
 #define fragPos gl_Position
 const bool useJoint1 = true;
 const bool useVertColor = true;
@@ -125,27 +126,38 @@ void main() {
 	if(useVertColor) {
 		vColor = vertColor.a;
 	}else{
-		vColor = 1;
+		vColor = 1.0;
 	}
+
 	vec4 pos = vec4(position, 1.0);
-	if(morphTargetOffset[0] > 0){
+
+	// *** patched: float-safe comparisons for morph targets ***
+	if(morphTargetOffset[0] > 0.0){
 		for(int idx = 0; idx < numTargets; ++idx)
 		{
-			float i = idx*numVertices+vertexId;
-			vec2 xy = vec2((i+0.5)/morphTargetTextureDimension-floor(i/morphTargetTextureDimension),(floor(i/morphTargetTextureDimension)+0.5)/morphTargetTextureDimension);
-			if(idx < morphTargetOffset[0]){
-				pos += morphTargetWeight[idx/4][idx%4] * COMPAT_TEXTURE(morphTargetValues,xy);
-			}else if(idx >= morphTargetOffset[2] && idx < morphTargetOffset[3]){
-				texcoord += morphTargetWeight[idx/4][idx%4] * vec2(COMPAT_TEXTURE(morphTargetValues,xy));
+			float i = float(idx) * float(numVertices) + vertexId;
+			vec2 xy = vec2(
+			    (i + 0.5) / float(morphTargetTextureDimension) - floor(i / float(morphTargetTextureDimension)),
+			    (floor(i / float(morphTargetTextureDimension)) + 0.5) / float(morphTargetTextureDimension)
+			);
+
+			float idxf = float(idx);
+
+			if(idxf < morphTargetOffset[0]){
+				pos += morphTargetWeight[idx/4][idx%4] * COMPAT_TEXTURE(morphTargetValues, xy);
+			}else if(idxf >= morphTargetOffset[2] && idxf < morphTargetOffset[3]){
+				texcoord += morphTargetWeight[idx/4][idx%4] * vec2(COMPAT_TEXTURE(morphTargetValues, xy));
 			}
 		}
 	}
+
 	if(useJoint0){
 		mat4 jointMatrix = getJointMatrix();
 		fragPos = model * jointMatrix * pos;
 	}else{
 		fragPos = model * pos;
 	}
+
 	#if __VERSION__ >= 450
 	gl_Layer = int(layers[gl_InstanceIndex/4][gl_InstanceIndex%4]);
 	lightIndex = gl_Layer/6;

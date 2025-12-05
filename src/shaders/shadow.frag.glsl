@@ -58,24 +58,26 @@ const int LightType_None = 0;
 const int LightType_Directional = 1;
 const int LightType_Point = 2;
 const int LightType_Spot = 3;
+
 void main()
 {
     vec4 color = baseColorFactor;
-    if(useTexture){
-        color = color * COMPAT_TEXTURE(tex, vec2(texTransform*vec3(texcoord0,1)));
+    if (useTexture) {
+        color = color * COMPAT_TEXTURE(tex, vec2(texTransform * vec3(texcoord0, 1.0)));
     }
     color.a *= vColorAlpha;
-    if((enableAlpha && color.a <= 0) || (color.a < alphaThreshold)){
+
+    // float-safe comparison
+    if ((enableAlpha && color.a <= 0.0) || (color.a < alphaThreshold)) {
         discard;
     }
+
     int index = int(lightIndex);
-    if(lights[index].type != LightType_Directional){
+    if (lights[index].type != LightType_Directional) {
         float lightDistance = length(FragPos.xyz - lights[index].position);
-    
         lightDistance = lightDistance / lights[index].shadowMapFar;
-        
         gl_FragDepth = lightDistance;
-    }else{
-        gl_FragDepth = gl_FragCoord.z/gl_FragCoord.w;
+    } else {
+        gl_FragDepth = gl_FragCoord.z / gl_FragCoord.w;
     }
 }
