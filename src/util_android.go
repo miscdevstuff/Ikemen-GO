@@ -22,13 +22,26 @@ func ShowErrorDialog(message string) {
     print("I.K.E.M.E.N Error\n\n" + message)
 }
 
-// TTF font loading for Android:
-// simplified version that only searches game paths (no system font lookup)
+// TTF font loading for Android.
 func LoadFntTtf(f *Fnt, fontfile string, filename string, height int32) {
     // Search in local/game directories
     fileDir := SearchFile(filename, []string{fontfile, sys.motifDir, "", "data/", "font/"})
     if fp := FileExist(fileDir); len(fp) != 0 {
         fileDir = fp
+    } else {
+        // Nothing found: apply some common aliases so Android builds
+        // don't require the user to manually drop arial.ttf.
+        if filename == "arial.ttf" || filename == "Arial.ttf" || filename == "ARIAL.TTF" {
+            // Our assets ship Open Sans; use that as a substitute.
+            alt := "font/Open_Sans/OpenSans-Regular.ttf"
+            if fp2 := FileExist(alt); len(fp2) != 0 {
+                fileDir = fp2
+            } else {
+                panic("TTF font not found: " + filename + " (also tried " + alt + ")")
+            }
+        } else {
+            panic("TTF font not found: " + filename)
+        }
     }
 
     if height == -1 {
