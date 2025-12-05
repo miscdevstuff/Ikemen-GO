@@ -304,13 +304,14 @@ build_sdl2_android() {
 		exit 1
 	fi
 
-	LIBS="-llog -landroid" \
+	LDFLAGS="-L$ANDROID_SYSROOT/usr/lib/$ANDROID_TRIPLE/$ANDROID_API -lOpenSLES -landroid -llog" \
+		LIBS="-lOpenSLES -llog -landroid" \
 		./configure \
 		--host="$ANDROID_TRIPLE" \
 		--prefix="$SDL2_PREFIX" \
 		--enable-shared \
 		--disable-static \
-		--disable-audio \
+		--enable-audio \
 		--enable-video-opengl \
 		--disable-hidapi \
 		CC="$CC" \
@@ -371,9 +372,9 @@ prepare_ikemen_assets_zip() {
 		cp -a "$REPO_ROOT/external" "$TEMP_ASSETS_ROOT/external"
 	fi
 	if [[ -d "$REPO_ROOT/font" ]]; then
-        echo "  - Copying engine font/ from main repo"
-        cp -a "$REPO_ROOT/font" "$TEMP_ASSETS_ROOT/font"
-    fi
+		echo "  - Copying engine font/ from main repo"
+		cp -a "$REPO_ROOT/font" "$TEMP_ASSETS_ROOT/font"
+	fi
 
 	# 2) Shallow-clone Elecbyte screenpack and merge its content
 	if [[ ! -d "$SCREENPACK_DIR/.git" ]]; then
