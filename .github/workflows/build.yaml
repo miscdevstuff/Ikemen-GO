@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install build-essential pkg-config autoconf automake libtool libtool-bin nasm yasm git make golang
+          sudo apt install build-essential pkg-config autoconf automake libtool libtool-bin nasm yasm git make golang libasound2-dev
 
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
