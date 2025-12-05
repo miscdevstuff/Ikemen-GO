@@ -1,3 +1,7 @@
+#ifdef GL_ES
+precision mediump float;
+precision mediump int;
+#endif
 #if __VERSION__ >= 450
 #define COMPAT_TEXTURE texture
 #define COMPAT_FRAGCOLOR FragColor

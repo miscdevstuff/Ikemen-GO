@@ -1,6 +1,10 @@
 #define MATH_PI 3.1415926535897932384626433832795
 #define MATH_INV_PI (1.0 / MATH_PI)
 
+#ifdef GL_ES
+precision mediump float;
+precision mediump int;
+#endif
 #if __VERSION__ >= 450
 #extension GL_EXT_multiview : enable
 #define COMPAT_TEXTURE texture

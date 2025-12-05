@@ -1,3 +1,7 @@
+#ifdef GL_ES
+precision highp float;
+precision mediump int;
+#endif
 #if __VERSION__ >= 450
 #extension GL_ARB_shader_viewport_layer_array  : enable
 #define COMPAT_TEXTURE texture
