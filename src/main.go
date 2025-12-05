@@ -164,7 +164,7 @@ func RunGameAndroid(basePath string) {
             // Try to append panic info to boot log as well
             if basePath != "" {
                 if f, err := os.OpenFile(
-                    filepath.Join(basePath, "ikemen_boot.log"),
+                    filepath.Join(basePath, "ikemen_boot_log.txt"),
                     os.O_APPEND|os.O_CREATE|os.O_WRONLY,
                     0o644,
                 ); err == nil {
@@ -181,7 +181,7 @@ func RunGameAndroid(basePath string) {
     var logFile *os.File
     if basePath != "" {
         if f, err := os.OpenFile(
-            filepath.Join(basePath, "ikemen_boot.log"),
+            filepath.Join(basePath, "ikemen_boot_log.txt"),
             os.O_CREATE|os.O_WRONLY|os.O_TRUNC,
             0o644,
         ); err == nil {

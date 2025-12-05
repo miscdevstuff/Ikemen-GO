@@ -80,6 +80,7 @@ ensure_host_deps() {
 	need nasm
 	need yasm
 	need go
+	need zip
 
 	if ((${#missing[@]})); then
 		echo "ERROR: Missing host tools: ${missing[*]}" >&2
@@ -348,6 +349,53 @@ bundle_shared_libs_into_jni() {
 	ls -lh "$JNI_DIR" || true
 }
 
+prepare_ikemen_assets_zip() {
+	echo "==> Preparing ikemen_assets.zip"
+
+	local TEMP_ASSETS_ROOT="$REPO_ROOT/build/ikemen_assets_tmp"
+	local SCREENPACK_DIR="$REPO_ROOT/build/elecbyte_screenpack"
+	local SCREENPACK_REPO="https://github.com/ikemen-engine/Ikemen_GO-Elecbyte-Screenpack.git"
+
+	# Clean old temp + assets dir
+	rm -rf "$ASSETS_DIR" "$TEMP_ASSETS_ROOT"
+	mkdir -p "$ASSETS_DIR" "$TEMP_ASSETS_ROOT"
+
+	# 1) Copy engine's own assets (from this repo)
+	#    This matches what a desktop build expects at runtime.
+	if [[ -d "$REPO_ROOT/data" ]]; then
+		echo "  - Copying engine data/ from main repo"
+		cp -a "$REPO_ROOT/data" "$TEMP_ASSETS_ROOT/data"
+	fi
+	if [[ -d "$REPO_ROOT/external" ]]; then
+		echo "  - Copying engine external/ from main repo"
+		cp -a "$REPO_ROOT/external" "$TEMP_ASSETS_ROOT/external"
+	fi
+
+	# 2) Shallow-clone Elecbyte screenpack and merge its content
+	if [[ ! -d "$SCREENPACK_DIR/.git" ]]; then
+		echo "  - Cloning Elecbyte screenpack (shallow)"
+		rm -rf "$SCREENPACK_DIR"
+		git clone --depth=1 "$SCREENPACK_REPO" "$SCREENPACK_DIR"
+	else
+		echo "  - Updating existing Elecbyte screenpack clone"
+		(cd "$SCREENPACK_DIR" && git fetch --depth=1 origin && git reset --hard origin/HEAD) || true
+	fi
+
+	# 3) Copy screenpack assets on top (they may override some defaults,
+	#    which is fine and matches desktop usage).
+	#    We keep it simple and copy the whole tree.
+	echo "  - Merging Elecbyte screenpack assets"
+	cp -a "$SCREENPACK_DIR/"* "$TEMP_ASSETS_ROOT/"
+
+	# 4) Build a single zip containing everything at TEMP_ASSETS_ROOT/.
+	local ZIP_PATH="$ASSETS_DIR/assets.zip"
+	echo "  - Creating ZIP at: $ZIP_PATH"
+	(cd "$TEMP_ASSETS_ROOT" && zip -r "$ZIP_PATH" .)
+
+	echo "==> assets.zip built, contents:"
+	ls -lh "$ZIP_PATH"
+}
+
 android_app_prepare() {
 	# ToDo: Check expected *.so exist with proper names in jniLibs
 
@@ -365,16 +413,9 @@ android_app_prepare() {
 	echo "==> jniLibs contents after prepare:"
 	ls -l "$JNI_DIR"
 
-	# Copy required assets to assets folder
-	if [[ ! -d $ASSETS_DIR ]]; then
-		mkdir "$ASSETS_DIR"
-	fi
-	if [[ ! -d "$ASSETS_DIR/data" ]]; then
-		cp -r "$REPO_ROOT/data" "$ASSETS_DIR/data"
-	fi
-	if [[ ! -d "$ASSETS_DIR/external" ]]; then
-		cp -r "$REPO_ROOT/external" "$ASSETS_DIR/external"
-	fi
+	# Build assets.zip into app/src/main/assets
+	prepare_ikemen_assets_zip
+
 	echo "==> Assets copied:"
 	ls -l "$ASSETS_DIR"
 }
