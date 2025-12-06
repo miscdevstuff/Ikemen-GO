@@ -415,12 +415,11 @@ func (s *System) init(w, h int32) *lua.LState {
 	gfx.BeginFrame(false)
 	// And the audio.
 	speaker.Init(beep.SampleRate(sys.cfg.Sound.SampleRate), sys.cfg.Sound.BufferSize)
-	if runtime.GOOS == "android" {
-		// Android: Direct mixing (Fast)
-		speaker.Play(s.soundMixer)
+	// Conditional Normalizer to save CPU
+	if sys.cfg.Sound.Normalizer {
+	    speaker.Play(NewNormalizer(s.soundMixer)) // High Quality: Prevents clipping but uses floating-point math (Higher CPU usage)
 	} else {
-		// Desktop: Normalized mixing (High Quality)
-		speaker.Play(NewNormalizer(s.soundMixer))
+        speaker.Play(s.soundMixer) // High Performance: Raw mixing. Faster, but can clip if too loud.
 	}
 	l := lua.NewState()
 	l.Options.IncludeGoStackTrace = true
