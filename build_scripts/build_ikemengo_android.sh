@@ -454,7 +454,10 @@ build_ikemen_android() {
 
 	# C flags: deps + gl4es headers + libxmp headers + Android
 	X11_Mocks="-DDisplay=void -DXVisualInfo=void -DXID=long -DWindow=long -DPixmap=long -DFont=long -DBool=int -DStatus=int -DColormap=long"
-	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC -DNOX11 -DGLX_STUBS -DUSE_ES2 -DUSE_EGL -DNO_GBM $X11_Mocks"
+	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC -DNOX11 -DGLX_STUBS -DUSE_ES2 -DUSE_EGL -DNO_GBM -DOBOE_ENABLE_AAUDIO=1 $X11_Mocks"
+
+	# C++ flags
+	export CGO_CXXFLAGS="-DANDROID -fPIC -DOBOE_ENABLE_AAUDIO=1"
 
 	# Linker flags: shared deps + Android libs + static libxmp gl4es
 	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog -lm -ldl -lEGL -lGLESv2 -laaudio"

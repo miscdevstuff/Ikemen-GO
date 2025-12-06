@@ -1,3 +1,7 @@
 [submodule "build/gl4es-src"]
 	path = build/gl4es-src
 	url = https://github.com/ptitSeb/gl4es.git
+[submodule "build/oto-src"]
+	path = build/oto-src
+	url = git@github.com:miscdevstuff/oto.git
+	branch = aaudio
