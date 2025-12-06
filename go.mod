@@ -47,3 +47,5 @@ require (
 	golang.org/x/image v0.23.0
 	golang.org/x/sys v0.36.0
 )
+
+replace github.com/ebitengine/oto/v3 => ./build/oto-src
