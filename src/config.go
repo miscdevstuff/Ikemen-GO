@@ -182,6 +182,7 @@ type Config struct {
 		SampleRate        int32   `ini:"SampleRate"`
 		BufferSize        int     `ini:"BufferSize"`
 		StereoEffects     bool    `ini:"StereoEffects"`
+		Normalizer        bool    `ini:"Normalizer"`
 		PanningRange      float32 `ini:"PanningRange"`
 		WavChannels       int32   `ini:"WavChannels"`
 		MasterVolume      int     `ini:"MasterVolume"`
