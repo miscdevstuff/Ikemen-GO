@@ -414,7 +414,7 @@ func (s *System) init(w, h int32) *lua.LState {
 	gfxFont.Init(gfx)
 	gfx.BeginFrame(false)
 	// And the audio.
-	speaker.Init(beep.SampleRate(sys.cfg.Sound.SampleRate), audioOutLen)
+	speaker.Init(beep.SampleRate(sys.cfg.Sound.SampleRate), sys.cfg.Sound.BufferSize)
 	if runtime.GOOS == "android" {
 		// Android: Direct mixing (Fast)
 		speaker.Play(s.soundMixer)

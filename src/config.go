@@ -180,6 +180,7 @@ type Config struct {
 	} `ini:"Video"`
 	Sound struct {
 		SampleRate        int32   `ini:"SampleRate"`
+		BufferSize        int     `ini:"BufferSize"`
 		StereoEffects     bool    `ini:"StereoEffects"`
 		PanningRange      float32 `ini:"PanningRange"`
 		WavChannels       int32   `ini:"WavChannels"`
@@ -361,6 +362,10 @@ func (c *Config) normalize() {
 	case 22050, 44100, 48000:
 	default:
 		c.SetValueUpdate("Sound.SampleRate", 44100)
+	}
+
+	if c.Sound.BufferSize <= 0 {
+		c.SetValueUpdate("Sound.BufferSize", 4096)
 	}
 
 	c.SetValueUpdate("Input.SOCDResolution", int(Clamp(int32(c.Input.SOCDResolution), 0, 4)))
