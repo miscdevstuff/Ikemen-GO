@@ -34,7 +34,7 @@ import (
 
 const (
 	audioOutLen          = 4096
-	audioFrequency       = 44100
+	audioFrequency       = 22050
 	audioPrecision       = 4
 	audioResampleQuality = 1
 	audioSoundFont       = "sound/soundfont.sf2" // default path for MIDI soundfont
@@ -1014,7 +1014,7 @@ func (s *SoundEffect) Stream(samples [][2]float64) (n int, ok bool) {
 	// TODO: Test mugen panning in relation to PanningWidth and zoom settings
 	// FAST PATH: Android Optimization
 	// Skip stereo panning and volume ramping to save CPU
-	if runtime.GOOS == "android" {
+	/* if runtime.GOOS == "android" {
 		n, ok = s.streamer.Stream(samples)
 		// Simple volume multiplication
 		vol := float64(s.volume / 256)
@@ -1023,7 +1023,7 @@ func (s *SoundEffect) Stream(samples [][2]float64) (n int, ok bool) {
 			samples[i][1] *= vol
 		}
 		return n, ok
-	}
+	} */
 
 	// DESKTOP PATH: High Quality
 	lv, rv := s.volume, s.volume
