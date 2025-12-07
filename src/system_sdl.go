@@ -96,58 +96,29 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	}
 
 	// Create main window.
-	// NOTE: Borderless fullscreen is in reality just a window without borders.
+	// NOTE: borderless fullscreen is in reality just a window without borders.
+	//       We want fake fullscreen so as not to mess with the users' other windows!
+	//       On Windows, true exclusive fullscreen can resize other windows and blank
+	//       the display if the game resolution is different from the desktop resolution.
+	//       On macOS, this can cause flickering behavior. "Fake" fullscreen prevents all
+	//       erratic behavior on all platforms.
 	if fullscreen {
-		if !s.cfg.Video.Borderless {
-			// Real fullscreen
-			windowFlags |= sdl.WINDOW_FULLSCREEN
-			windowFlags |= sdl.WINDOW_RESIZABLE
-		} else {
-			windowFlags |= sdl.WINDOW_FULLSCREEN_DESKTOP
-			windowFlags |= sdl.WINDOW_BORDERLESS
-		}
+		windowFlags |= sdl.WINDOW_FULLSCREEN_DESKTOP
 	} else {
-		windowFlags |= sdl.WINDOW_RESIZABLE
 		windowFlags |= sdl.WINDOW_SHOWN
 	}
 
-	title := s.cfg.Config.WindowTitle
-	if title == "" {
-		title = "Ikemen GO"
+	// Because we ought to set these flags the same regardless of fullscreen or not.
+	// It makes no sense to have the resizable flag on a window without borders.
+	if !s.cfg.Video.Borderless {
+		windowFlags |= sdl.WINDOW_RESIZABLE
+	} else {
+		windowFlags |= sdl.WINDOW_BORDERLESS
 	}
 
-	// Replace w2/h2 with the actual display resolution on android if needed:
-	// if runtime.GOOS == "android" {
-	//     w2, h2 = mode.W, mode.H
-	// }
-
-	// --- Create / reuse SDL window (single window per process) ---
-	if globalSDLWindow == nil {
-		fmt.Println("[Ikemen] newWindow(): creating SDL window",
-			"title=", title, "w2=", w2, "h2=", h2, "fullscreen=", fullscreen)
-
-		win, err := sdl.CreateWindow(
-			title,
-			sdl.WINDOWPOS_CENTERED,
-			sdl.WINDOWPOS_CENTERED,
-			w2, h2,
-			windowFlags,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create window: %w", err)
-		}
-		globalSDLWindow = win
-	} else {
-		fmt.Println("[Ikemen] newWindow(): reusing existing SDL window")
-	}
-
-	window = globalSDLWindow
-
-	// Log window ID so we can see what's going on in logcat / boot log
-	if id, errID := window.GetID(); errID == nil {
-		fmt.Println("[Ikemen] newWindow(): window ID =", id)
-	} else {
-		fmt.Println("[Ikemen] newWindow(): GetID error:", errID)
+	window, err = sdl.CreateWindow(s.cfg.Config.WindowTitle, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, w2, h2, windowFlags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create window: %w", err)
 	}
 
 	// Set window attributes
@@ -159,6 +130,11 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		}
 		sdl.ShowCursor(sdl.DISABLE)
 	} else {
+		if !s.cfg.Video.Borderless {
+			window.SetBordered(true)
+		} else {
+			window.SetBordered(false)
+		}
 		window.SetSize(w2, h2)
 		sdl.ShowCursor(sdl.ENABLE)
 		if s.cfg.Video.WindowCentered {
@@ -324,10 +300,10 @@ func (w *Window) GetClipboardString() string {
 }
 
 func (w *Window) toggleFullscreen() {
-	var mode, _ = sdl.GetDisplayMode(0, 0)
+	// var mode, _ = sdl.GetDisplayMode(0, 0)
 
 	if w.fullscreen {
-		w.Window.SetBordered(true)
+		w.Window.SetBordered(false)
 		w.Window.SetFullscreen(0)
 		sdl.ShowCursor(sdl.ENABLE)
 		w.Window.SetSize(int32(w.w), int32(w.h))
@@ -339,14 +315,9 @@ func (w *Window) toggleFullscreen() {
 		w.x, w.y = int(x2), int(y2)
 		w.w, w.h = int(w2), int(h2)
 
-		w.Window.SetBordered(false)
-
-		if sys.cfg.Video.Borderless {
-			w.Window.SetSize(mode.W, mode.H)
-			w.Window.SetFullscreen(uint32(sdl.WINDOW_FULLSCREEN_DESKTOP))
-		} else {
-			w.Window.SetFullscreen(uint32(sdl.WINDOW_FULLSCREEN))
-		}
+		w.Window.SetBordered(!sys.cfg.Video.Borderless)
+		w.Window.SetSize(int32(sys.cfg.Video.WindowWidth), int32(sys.cfg.Video.WindowHeight))
+		w.Window.SetFullscreen(uint32(sdl.WINDOW_FULLSCREEN_DESKTOP))
 		sdl.ShowCursor(sdl.DISABLE)
 	}
 	if sys.cfg.Video.VSync != -1 &&
