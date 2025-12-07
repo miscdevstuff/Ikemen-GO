@@ -3,6 +3,8 @@ package com.ikemenmobile
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
+import android.util.Log
+import android.view.ViewGroup
 import org.libsdl.app.SDLActivity
 
 class MainActivity : SDLActivity() {
@@ -15,6 +17,18 @@ class MainActivity : SDLActivity() {
 
         // Before SDL / Go touches basePath, make sure assets are extracted there.
         AssetsExtractor.ensureAssetsExtracted(this)
+
+        // Overlay virtual gamepad on top of SDL surface
+        val root = window.decorView.findViewById<ViewGroup>(android.R.id.content)
+        val pad = VirtualGamepadView(this)
+        root.addView(
+            pad,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        Log.d("MainActivity", "VirtualGamepadView attached")
     }
 
     override fun onResume() {
