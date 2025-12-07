@@ -54,7 +54,7 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	}
 	var x, y = (mode.W - w2) / 2, (mode.H - h2) / 2
 
-	var windowFlags uint32 = sdl.WINDOW_INPUT_FOCUS
+    var windowFlags uint32 = sdl.WINDOW_INPUT_FOCUS
 
 	if runtime.GOOS == "android" {
 		// --- ANDROID PATH: Force GLES2 context for gl4es ---
@@ -102,24 +102,64 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	//       the display if the game resolution is different from the desktop resolution.
 	//       On macOS, this can cause flickering behavior. "Fake" fullscreen prevents all
 	//       erratic behavior on all platforms.
-	if fullscreen {
-		windowFlags |= sdl.WINDOW_FULLSCREEN_DESKTOP
-	} else {
-		windowFlags |= sdl.WINDOW_SHOWN
+	if runtime.GOOS != "android" {
+		if fullscreen {
+			windowFlags |= sdl.WINDOW_FULLSCREEN_DESKTOP
+		} else {
+			windowFlags |= sdl.WINDOW_SHOWN
+		}
 	}
 
 	// Because we ought to set these flags the same regardless of fullscreen or not.
 	// It makes no sense to have the resizable flag on a window without borders.
-	if !s.cfg.Video.Borderless {
-		windowFlags |= sdl.WINDOW_RESIZABLE
-	} else {
-		windowFlags |= sdl.WINDOW_BORDERLESS
+	if runtime.GOOS != "android" {
+    	if !s.cfg.Video.Borderless {
+    		windowFlags |= sdl.WINDOW_RESIZABLE
+    	} else {
+    		windowFlags |= sdl.WINDOW_BORDERLESS
+    	}
 	}
 
-	window, err = sdl.CreateWindow(s.cfg.Config.WindowTitle, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, w2, h2, windowFlags)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create window: %w", err)
-	}
+    title := s.cfg.Config.WindowTitle
+    if title == "" {
+    	title = "Ikemen GO"
+    }
+
+    if runtime.GOOS != "android" {
+        // --- Create / reuse SDL window (single window per process) ---
+        if globalSDLWindow == nil {
+    		fmt.Println("[Ikemen] newWindow(): creating SDL window",
+    			"title=", title, "w2=", w2, "h2=", h2, "fullscreen=", fullscreen)
+
+    		win, err := sdl.CreateWindow(
+    			title,
+    			sdl.WINDOWPOS_CENTERED,
+    			sdl.WINDOWPOS_CENTERED,
+    			w2, h2,
+    			windowFlags,
+    		)
+    		if err != nil {
+    			return nil, fmt.Errorf("failed to create window: %w", err)
+    		}
+    		globalSDLWindow = win
+    	} else {
+    		fmt.Println("[Ikemen] newWindow(): reusing existing SDL window")
+    	}
+
+    	window = globalSDLWindow
+    	window.SetResizable(true)
+
+    	// Log window ID
+    	if id, errID := window.GetID(); errID == nil {
+    		fmt.Println("[Ikemen] newWindow(): window ID =", id)
+    	}
+    } else {
+        window, err = sdl.CreateWindow(s.cfg.Config.WindowTitle, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, w2, h2, windowFlags)
+    	if err != nil {
+    		return nil, fmt.Errorf("failed to create window: %w", err)
+    	}
+    	window.SetResizable(true)
+    }
 
 	// Set window attributes
 	if fullscreen {
@@ -155,7 +195,7 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		}
 	}
 
-	ret := &Window{
+    ret := &Window{
 		Window:     window,
 		title:      title,
 		x:          int(x),
@@ -164,8 +204,9 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		h:          h,
 		fullscreen: fullscreen,
 		closeflag:  false,
+		glContext:  nil, // Initialize if needed, or leave nil
 	}
-	return ret, nil
+	return ret, err
 }
 
 // Create & bind GL context when using an OpenGL render mode.
@@ -396,6 +437,10 @@ func (w *Window) Close() {
 			w.Window.Destroy()
 		}
 		w.Window = nil
+		// Clear the global sdl window cache we created for android
+		if runtime.GOOS == "android" {
+			globalSDLWindow = nil
+		}
 	}
 	sdl.Quit()
 }
