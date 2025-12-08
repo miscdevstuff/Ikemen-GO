@@ -6,100 +6,89 @@ import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
 import android.view.View
-import android.widget.Button
+import android.view.ViewGroup
+import android.view.ContextThemeWrapper
 import android.widget.FrameLayout
 import android.widget.PopupMenu
-import android.widget.Toast
+import androidx.appcompat.widget.AppCompatButton
 import org.libsdl.app.SDLActivity
 
 class MainActivity : SDLActivity() {
 
+    private lateinit var virtualPad: VirtualGamepadLayout
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Force landscape once on startup
+        // Force landscape
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
-        // Extract game assets before Go/SDL touches basePath
+        // Extract Ikemen assets before Go/SDL touches basePath
         AssetsExtractor.ensureAssetsExtracted(this)
 
-        // Root view is a FrameLayout
-        val root = window.decorView.findViewById<FrameLayout>(android.R.id.content)
+        // Root container SDL uses
+        val root = window.decorView.findViewById<ViewGroup>(android.R.id.content)
 
-        // 1) Virtual gamepad overlay (initially visible)
-        val pad = VirtualGamepadView(this)
+        // Our overlay (XML-based virtual pad)
+        virtualPad = VirtualGamepadLayout(this)
         root.addView(
-            pad,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
+            virtualPad,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
 
-        // 2) Menu button that is NEVER hidden by gamepad toggle
-        val menuButton = Button(this).apply {
-            text = "☰"
-            alpha = 0.85f
+        // Floating menu button (≡) – always visible
+        val themedCtx = ContextThemeWrapper(this, R.style.VirtualPadMenuButton)
+        val menuButton = AppCompatButton(themedCtx, null, 0).apply {
+            text = "≡"
+            textSize = 16f
+            alpha = 0.9f
+
+            val density = resources.displayMetrics.density
+            val size = (40f * density).toInt()
+            val margin = (16f * density).toInt()
+
+            layoutParams = FrameLayout.LayoutParams(
+                size,
+                size,
+                Gravity.TOP or Gravity.START
+            ).apply {
+                setMargins(margin, margin, margin, margin)
+            }
+
+            setOnClickListener { showGamepadMenu(this) }
         }
 
-        val menuSize = (48 * resources.displayMetrics.density).toInt()
-        val menuLp = FrameLayout.LayoutParams(menuSize, menuSize).apply {
-            gravity = Gravity.START or Gravity.TOP
-            marginStart = (8 * resources.displayMetrics.density).toInt()
-            topMargin = (8 * resources.displayMetrics.density).toInt()
-        }
-        root.addView(menuButton, menuLp)
+        root.addView(menuButton)
 
-        // Menu hierarchy
-        menuButton.setOnClickListener {
-            showRootMenu(menuButton, pad)
-        }
-
-        Log.d("MainActivity", "VirtualGamepadView + menu button attached")
+        Log.d("MainActivity", "VirtualGamepadLayout attached")
     }
 
-    private fun showRootMenu(anchor: View, pad: View) {
-        val pm = PopupMenu(this, anchor)
-        pm.menu.add("Gamepad")
+    private fun showGamepadMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add(0, 1, 0, "Toggle gamepad")
+        popup.menu.add(0, 2, 1, "Import gamepad layout (stub)")
 
-        pm.setOnMenuItemClickListener { item ->
-            when (item.title.toString()) {
-                "Gamepad" -> {
-                    showGamepadMenu(anchor, pad)
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> {
+                    virtualPad.visibility =
+                        if (virtualPad.visibility == View.VISIBLE) View.GONE else View.VISIBLE
                     true
                 }
+
+                2 -> {
+                    // Placeholder for future in-app layout editor / importer
+                    Log.d("MainActivity", "Import gamepad layout – not implemented yet")
+                    true
+                }
+
                 else -> false
             }
         }
-        pm.show()
-    }
-
-    private fun showGamepadMenu(anchor: View, pad: View) {
-        val pm = PopupMenu(this, anchor)
-        pm.menu.add("Toggle gamepad")
-        pm.menu.add("Import gamepad layout")
-
-        pm.setOnMenuItemClickListener { item ->
-            when (item.title.toString()) {
-                "Toggle gamepad" -> {
-                    pad.visibility =
-                        if (pad.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                    true
-                }
-                "Import gamepad layout" -> {
-                    // Stub – later we’ll open a proper UI / file picker
-                    Toast.makeText(
-                        this,
-                        "Import layout: not implemented yet",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    Log.d("MainActivity", "Import gamepad layout requested (stub)")
-                    true
-                }
-                else -> false
-            }
-        }
-        pm.show()
+        popup.show()
     }
 
     override fun onResume() {
@@ -114,13 +103,11 @@ class MainActivity : SDLActivity() {
 
     // SDL handles native main + GL + input
     override fun getLibraries(): Array<String> {
-        return arrayOf("ikemen") // Loads libikemen.so
+        return arrayOf("ikemen")
     }
 
-    // This becomes argv[1] in SDL_main
     override fun getArguments(): Array<String> {
-        val base = getExternalFilesDir(null)?.absolutePath
-            ?: filesDir.absolutePath
+        val base = getExternalFilesDir(null)?.absolutePath ?: filesDir.absolutePath
         return arrayOf(base)
     }
 }
