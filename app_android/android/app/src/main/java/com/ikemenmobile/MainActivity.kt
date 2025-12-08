@@ -4,6 +4,7 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.view.ViewGroup
 import org.libsdl.app.SDLActivity
 
@@ -20,7 +21,12 @@ class MainActivity : SDLActivity() {
 
         // Overlay virtual gamepad on top of SDL surface
         val root = window.decorView.findViewById<ViewGroup>(android.R.id.content)
-        val pad = VirtualGamepadView(this)
+        val pad = VirtualGamepadView(this).apply {
+            // Hook up hide/show toggle button
+            onToggleRequested = {
+                visibility = if (visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            }
+        }
         root.addView(
             pad,
             ViewGroup.LayoutParams(

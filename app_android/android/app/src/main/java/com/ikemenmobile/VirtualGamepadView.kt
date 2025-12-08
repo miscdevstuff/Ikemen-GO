@@ -1,398 +1,358 @@
 package com.ikemenmobile
 
+import android.app.Activity
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
+import android.graphics.*
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
-import org.libsdl.app.SDLActivity
-import kotlin.math.*
+import kotlin.math.hypot
 
 class VirtualGamepadView @JvmOverloads constructor(
     context: Context,
-    attrs: AttributeSet? = null
-) : View(context, attrs) {
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0
+) : View(context, attrs, defStyleAttr) {
 
-    companion object {
-        private const val TAG = "VirtualGamepad"
-        private const val DEBUG = true
+    private val tagLog = "VirtualGamepad"
+
+    // --- Paints -------------------------------------------------------------
+
+    // Darkish gray like emulators (semi-transparent)
+    private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(180, 40, 40, 40)
+        style = Paint.Style.FILL
     }
 
-    private val density = resources.displayMetrics.density
-    private fun dp(v: Float) = v * density
+    private val pressedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(230, 220, 220, 220)
+        style = Paint.Style.FILL
+    }
 
-    // Paints
-    private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(220, 0, 0, 0)
         style = Paint.Style.STROKE
         strokeWidth = dp(2f)
-        alpha = 180
-    }
-    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        alpha = 70
-    }
-    private val pressedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        alpha = 140
     }
 
-    // State
-    private val activeKeys = mutableSetOf<Int>()
-    private var gamepadVisible = true
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        textSize = dp(11f)
+    }
 
-    // Layout cache
-    private var cachedW = 0
-    private var cachedH = 0
+    // --- Types & data structures -------------------------------------------
+
+    private enum class ButtonType {
+        DPAD_UP,
+        DPAD_DOWN,
+        DPAD_LEFT,
+        DPAD_RIGHT,
+        BUTTON_A,
+        BUTTON_B,
+        BUTTON_C,
+        BUTTON_D,
+        BUTTON_START,
+        BUTTON_TOGGLE
+    }
+
+    private data class ButtonRegion(
+        val type: ButtonType,
+        var cx: Float = 0f,
+        var cy: Float = 0f,
+        var radius: Float = 0f,
+        val keyCode: Int? = null,   // null for pure-UI buttons like toggle
+        var pressed: Boolean = false
+    )
+
+    // All buttons
+    private val buttons = mutableMapOf<ButtonType, ButtonRegion>()
+
+    // For each pointerId, which button it's currently pressing
+    private val pointerToButton = mutableMapOf<Int, ButtonType>()
+
+    // Optional: callback for the "hide/show" toggle button
+    var onToggleRequested: (() -> Unit)? = null
+
+    // -----------------------------------------------------------------------
+    // Layout
+    // -----------------------------------------------------------------------
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+
+        buttons.clear()
+
+        val width = w.toFloat()
+        val height = h.toFloat()
+        val padding = dp(16f)
+
+        // --- D-Pad on bottom-left ------------------------------------------
+        val dpadRadius = height * 0.09f      // bigger than before
+        val dpadCenterX = padding + dpadRadius * 2.0f
+        val dpadCenterY = height - padding - dpadRadius * 2.0f
+        val dpadOffset = dpadRadius * 1.3f   // spacing between arrows
+
+        buttons[ButtonType.DPAD_UP] = ButtonRegion(
+            ButtonType.DPAD_UP,
+            dpadCenterX,
+            dpadCenterY - dpadOffset,
+            dpadRadius,
+            KeyEvent.KEYCODE_DPAD_UP
+        )
+        buttons[ButtonType.DPAD_DOWN] = ButtonRegion(
+            ButtonType.DPAD_DOWN,
+            dpadCenterX,
+            dpadCenterY + dpadOffset,
+            dpadRadius,
+            KeyEvent.KEYCODE_DPAD_DOWN
+        )
+        buttons[ButtonType.DPAD_LEFT] = ButtonRegion(
+            ButtonType.DPAD_LEFT,
+            dpadCenterX - dpadOffset,
+            dpadCenterY,
+            dpadRadius,
+            KeyEvent.KEYCODE_DPAD_LEFT
+        )
+        buttons[ButtonType.DPAD_RIGHT] = ButtonRegion(
+            ButtonType.DPAD_RIGHT,
+            dpadCenterX + dpadOffset,
+            dpadCenterY,
+            dpadRadius,
+            KeyEvent.KEYCODE_DPAD_RIGHT
+        )
+
+        // --- Face buttons bottom-right -------------------------------------
+        val faceRadius = height * 0.085f      // larger action buttons
+        val faceCenterX = width - padding - faceRadius * 2.0f
+        val faceCenterY = height - padding - faceRadius * 1.8f
+        val faceOffset = faceRadius * 1.5f
+
+        // Map to Ikemen keyboard defaults: Z, X, C, A
+        buttons[ButtonType.BUTTON_A] = ButtonRegion(
+            ButtonType.BUTTON_A,
+            faceCenterX + faceOffset,
+            faceCenterY,
+            faceRadius,
+            KeyEvent.KEYCODE_Z
+        )
+        buttons[ButtonType.BUTTON_B] = ButtonRegion(
+            ButtonType.BUTTON_B,
+            faceCenterX,
+            faceCenterY - faceOffset,
+            faceRadius,
+            KeyEvent.KEYCODE_X
+        )
+        buttons[ButtonType.BUTTON_C] = ButtonRegion(
+            ButtonType.BUTTON_C,
+            faceCenterX - faceOffset,
+            faceCenterY,
+            faceRadius,
+            KeyEvent.KEYCODE_C
+        )
+        buttons[ButtonType.BUTTON_D] = ButtonRegion(
+            ButtonType.BUTTON_D,
+            faceCenterX,
+            faceCenterY + faceOffset,
+            faceRadius,
+            KeyEvent.KEYCODE_A
+        )
+
+        // --- Start button (small, near center bottom) ----------------------
+        val startRadius = height * 0.045f
+        buttons[ButtonType.BUTTON_START] = ButtonRegion(
+            ButtonType.BUTTON_START,
+            width * 0.5f,
+            height - padding - startRadius * 1.5f,
+            startRadius,
+            KeyEvent.KEYCODE_ENTER
+        )
+
+        // --- Toggle button (small, left side) ------------------------------
+        val toggleRadius = height * 0.04f
+        buttons[ButtonType.BUTTON_TOGGLE] = ButtonRegion(
+            ButtonType.BUTTON_TOGGLE,
+            padding + toggleRadius * 1.2f,
+            height * 0.5f,
+            toggleRadius,
+            null // no key event, just UI toggle
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // Drawing
+    // -----------------------------------------------------------------------
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        if (width <= 0 || height <= 0) return
-        cachedW = width
-        cachedH = height
+        buttons.values.forEach { btn ->
+            val paint = if (btn.pressed) pressedPaint else basePaint
+            canvas.drawCircle(btn.cx, btn.cy, btn.radius, paint)
+            canvas.drawCircle(btn.cx, btn.cy, btn.radius, strokePaint)
 
-        // Toggle button is always visible
-        drawToggleButton(canvas)
+            val label = when (btn.type) {
+                ButtonType.DPAD_UP -> "↑"
+                ButtonType.DPAD_DOWN -> "↓"
+                ButtonType.DPAD_LEFT -> "←"
+                ButtonType.DPAD_RIGHT -> "→"
+                ButtonType.BUTTON_A -> "A"
+                ButtonType.BUTTON_B -> "B"
+                ButtonType.BUTTON_C -> "C"
+                ButtonType.BUTTON_D -> "D"
+                ButtonType.BUTTON_START -> "START"
+                ButtonType.BUTTON_TOGGLE -> "☰"
+            }
 
-        if (!gamepadVisible) return
-
-        drawDpad(canvas)
-        drawButtons(canvas)
-        drawStart(canvas)
-    }
-
-    // ---------------- Layout helpers ----------------
-
-    private fun dpadCenterX() = dp(16f) + min(width, height) * 0.16f
-    private fun dpadCenterY() = height - dp(16f) - min(width, height) * 0.16f
-    private fun dpadRadius() = min(width, height) * 0.16f
-
-    private fun buttonClusterRadius() = min(width, height) * 0.11f
-    private fun buttonRadius() = buttonClusterRadius() * 0.35f
-    private fun buttonClusterCenterX() = width - dp(16f) - buttonClusterRadius()
-    private fun buttonClusterCenterY() = height - dp(16f) - buttonClusterRadius()
-
-    private fun startRect(): RectF {
-        val w = dp(90f)
-        val h = dp(28f)
-        val cx = width / 2f
-        val cy = height - dp(40f)
-        return RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
-    }
-
-    private fun toggleRect(): RectF {
-        val r = dp(18f)
-        val cx = width - dp(26f)
-        val cy = dp(26f)
-        return RectF(cx - r, cy - r, cx + r, cy + r)
-    }
-
-    // ---------------- Drawing ----------------
-
-    private fun drawDpad(canvas: Canvas) {
-        val cx = dpadCenterX()
-        val cy = dpadCenterY()
-        val r = dpadRadius()
-
-        // Outer circle
-        canvas.drawCircle(cx, cy, r, basePaint)
-
-        // Cross lines
-        canvas.drawLine(cx - r, cy, cx + r, cy, basePaint)
-        canvas.drawLine(cx, cy - r, cx, cy + r, basePaint)
-
-        // Highlight pressed directions
-        fun isPressed(code: Int) = activeKeys.contains(code)
-
-        val sectorPaint = pressedPaint
-
-        // Up
-        if (isPressed(KeyEvent.KEYCODE_DPAD_UP)) {
-            val pathR = RectF(cx - r, cy - r, cx + r, cy + r)
-            canvas.drawArc(pathR, 225f, 90f, true, sectorPaint)
-        }
-        // Down
-        if (isPressed(KeyEvent.KEYCODE_DPAD_DOWN)) {
-            val pathR = RectF(cx - r, cy - r, cx + r, cy + r)
-            canvas.drawArc(pathR, 45f, 90f, true, sectorPaint)
-        }
-        // Left
-        if (isPressed(KeyEvent.KEYCODE_DPAD_LEFT)) {
-            val pathR = RectF(cx - r, cy - r, cx + r, cy + r)
-            canvas.drawArc(pathR, 135f, 90f, true, sectorPaint)
-        }
-        // Right
-        if (isPressed(KeyEvent.KEYCODE_DPAD_RIGHT)) {
-            val pathR = RectF(cx - r, cy - r, cx + r, cy + r)
-            canvas.drawArc(pathR, -45f, 90f, true, sectorPaint)
+            val textY = btn.cy - ((textPaint.descent() + textPaint.ascent()) / 2)
+            canvas.drawText(label, btn.cx, textY, textPaint)
         }
     }
 
-    // four action buttons: A/B/C/X mapped to Z,X,C,A keys
-    private fun drawButtons(canvas: Canvas) {
-        val cx = buttonClusterCenterX()
-        val cy = buttonClusterCenterY()
-        val cr = buttonClusterRadius()
-        val br = buttonRadius()
-
-        // Layout diamond: top, right, bottom, left
-        val topX = cx
-        val topY = cy - cr * 0.6f
-        val rightX = cx + cr * 0.6f
-        val rightY = cy
-        val bottomX = cx
-        val bottomY = cy + cr * 0.6f
-        val leftX = cx - cr * 0.6f
-        val leftY = cy
-
-        drawButtonCircle(
-            canvas, topX, topY, br,
-            KeyEvent.KEYCODE_A, // maps to 'A' (X button in config)
-        )
-        drawButtonCircle(
-            canvas, rightX, rightY, br,
-            KeyEvent.KEYCODE_X, // 'X' (B button)
-        )
-        drawButtonCircle(
-            canvas, bottomX, bottomY, br,
-            KeyEvent.KEYCODE_Z, // 'Z' (A button)
-        )
-        drawButtonCircle(
-            canvas, leftX, leftY, br,
-            KeyEvent.KEYCODE_C, // 'C'
-        )
-    }
-
-    private fun drawButtonCircle(
-        canvas: Canvas,
-        cx: Float,
-        cy: Float,
-        r: Float,
-        keyCode: Int
-    ) {
-        val p = if (activeKeys.contains(keyCode)) pressedPaint else fillPaint
-        canvas.drawCircle(cx, cy, r, p)
-        canvas.drawCircle(cx, cy, r, basePaint)
-    }
-
-    private fun drawStart(canvas: Canvas) {
-        val rect = startRect()
-        val paint = if (activeKeys.contains(KeyEvent.KEYCODE_ENTER)) pressedPaint else fillPaint
-        canvas.drawRoundRect(rect, dp(8f), dp(8f), paint)
-        canvas.drawRoundRect(rect, dp(8f), dp(8f), basePaint)
-    }
-
-    private fun drawToggleButton(canvas: Canvas) {
-        val rect = toggleRect()
-        val p = fillPaint
-        val b = basePaint
-        canvas.drawOval(rect, p)
-        canvas.drawOval(rect, b)
-        // crude indicator: filled if visible
-        if (gamepadVisible) {
-            val inner = RectF(
-                rect.left + dp(4f),
-                rect.top + dp(4f),
-                rect.right - dp(4f),
-                rect.bottom - dp(4f)
-            )
-            canvas.drawOval(inner, pressedPaint)
-        }
-    }
-
-    // ---------------- Touch handling ----------------
+    // -----------------------------------------------------------------------
+    // Touch handling (press/hold/release, sweeps)
+    // -----------------------------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (width <= 0 || height <= 0) return false
+        val action = event.actionMasked
+        val index = event.actionIndex
 
-        when (event.actionMasked) {
+        when (action) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                val pointerId = event.getPointerId(index)
+                handleDown(pointerId, event.getX(index), event.getY(index))
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                // Handle all pointers for sweeps
+                for (i in 0 until event.pointerCount) {
+                    val pointerId = event.getPointerId(i)
+                    handleMove(pointerId, event.getX(i), event.getY(i))
+                }
+            }
+
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_POINTER_UP,
             MotionEvent.ACTION_CANCEL -> {
-                releaseAllKeys()
-                return true
+                val pointerId = event.getPointerId(index)
+                handleUp(pointerId)
             }
         }
 
-        val newPressed = mutableSetOf<Int>()
-
-        // First: check toggle button separately for single taps
-        if (event.actionMasked == MotionEvent.ACTION_DOWN ||
-            event.actionMasked == MotionEvent.ACTION_POINTER_DOWN
-        ) {
-            val idx = event.actionIndex
-            val x = event.getX(idx)
-            val y = event.getY(idx)
-            if (hitToggle(x, y)) {
-                toggleVisibility()
-                return true
-            }
-        }
-
-        if (gamepadVisible) {
-            // For all pointers, accumulate which keys should be down
-            val pointerCount = event.pointerCount
-            for (i in 0 until pointerCount) {
-                val x = event.getX(i)
-                val y = event.getY(i)
-                hitGamepad(x, y, newPressed)
-            }
-        }
-
-        // Compare with previous state and send key events
-        updateKeys(newPressed)
-        invalidate()
         return true
     }
 
-    private fun hitToggle(x: Float, y: Float): Boolean {
-        val r = toggleRect()
-        return r.contains(x, y)
+    private fun handleDown(pointerId: Int, x: Float, y: Float) {
+        val hit = hitTest(x, y) ?: return
+
+        if (hit.type == ButtonType.BUTTON_TOGGLE) {
+            // Just UI toggle – no key events
+            onToggleRequested?.invoke()
+            return
+        }
+
+        pointerToButton[pointerId] = hit.type
+        setButtonPressed(hit.type, true)
+        sendKeyDown(hit)
     }
 
-    private fun toggleVisibility() {
-        gamepadVisible = !gamepadVisible
-        if (!gamepadVisible) {
-            if (DEBUG) Log.d(TAG, "Gamepad hidden, releasing all keys")
-            releaseAllKeys()
-        } else {
-            if (DEBUG) Log.d(TAG, "Gamepad shown")
+    private fun handleMove(pointerId: Int, x: Float, y: Float) {
+        val currentType = pointerToButton[pointerId]
+        val newHit = hitTest(x, y)
+
+        // If pointer left its old button, release it
+        if (currentType != null && (newHit == null || newHit.type != currentType)) {
+            val oldBtn = buttons[currentType]
+            if (oldBtn != null) {
+                setButtonPressed(currentType, false)
+                sendKeyUp(oldBtn)
+            }
+            pointerToButton.remove(pointerId)
         }
+
+        // If pointer moved onto a new button, press it
+        if (newHit != null && newHit.type != ButtonType.BUTTON_TOGGLE) {
+            if (pointerToButton[pointerId] != newHit.type) {
+                pointerToButton[pointerId] = newHit.type
+                setButtonPressed(newHit.type, true)
+                sendKeyDown(newHit)
+            }
+        }
+    }
+
+    private fun handleUp(pointerId: Int) {
+        val type = pointerToButton.remove(pointerId) ?: return
+        val btn = buttons[type] ?: return
+        setButtonPressed(type, false)
+        sendKeyUp(btn)
+    }
+
+    private fun hitTest(x: Float, y: Float): ButtonRegion? {
+        // Simple circular hit test
+        // Closest button wins if overlaps
+        var best: ButtonRegion? = null
+        var bestDist = Float.MAX_VALUE
+
+        for (btn in buttons.values) {
+            val d = hypot(x - btn.cx, y - btn.cy)
+            if (d <= btn.radius) {
+                if (d < bestDist) {
+                    bestDist = d
+                    best = btn
+                }
+            }
+        }
+        return best
+    }
+
+    private fun setButtonPressed(type: ButtonType, pressed: Boolean) {
+        val btn = buttons[type] ?: return
+        if (btn.pressed == pressed) return
+        btn.pressed = pressed
         invalidate()
     }
 
-    private fun hitGamepad(x: Float, y: Float, collector: MutableSet<Int>) {
-        // DPad
-        hitDpad(x, y, collector)
+    // -----------------------------------------------------------------------
+    // Key injection
+    // -----------------------------------------------------------------------
 
-        // Action cluster
-        hitButtons(x, y, collector)
+    private fun sendKeyDown(btn: ButtonRegion) {
+        val keyCode = btn.keyCode ?: return
+        Log.d(tagLog, "Key DOWN: $keyCode")
 
-        // Start
-        if (startRect().contains(x, y)) {
-            collector.add(KeyEvent.KEYCODE_ENTER) // RETURN in config.ini
-        }
+        val now = SystemClock.uptimeMillis()
+        val event = KeyEvent(
+            now,
+            now,
+            KeyEvent.ACTION_DOWN,
+            keyCode,
+            0
+        )
+        (context as? Activity)?.dispatchKeyEvent(event)
     }
 
-    private fun hitDpad(x: Float, y: Float, collector: MutableSet<Int>) {
-        val cx = dpadCenterX()
-        val cy = dpadCenterY()
-        val r = dpadRadius()
-        val dx = x - cx
-        val dy = y - cy
-        val dist = hypot(dx, dy)
+    private fun sendKeyUp(btn: ButtonRegion) {
+        val keyCode = btn.keyCode ?: return
+        Log.d(tagLog, "Key UP  : $keyCode")
 
-        if (dist > r * 1.1f) return
-
-        // angle: -pi to pi, 0 at +X, positive CCW
-        val angle = atan2(-dy, dx) // invert y so up is positive
-        val deg = (Math.toDegrees(angle.toDouble()) + 360.0) % 360.0
-
-        // 8-way zones (45° each)
-        fun add(code: Int) = collector.add(code)
-
-        when {
-            deg in 337.5..360.0 || deg < 22.5 -> {          // Right
-                add(KeyEvent.KEYCODE_DPAD_RIGHT)
-            }
-            deg < 67.5 -> {                                 // Up-Right
-                add(KeyEvent.KEYCODE_DPAD_RIGHT)
-                add(KeyEvent.KEYCODE_DPAD_UP)
-            }
-            deg < 112.5 -> {                                // Up
-                add(KeyEvent.KEYCODE_DPAD_UP)
-            }
-            deg < 157.5 -> {                                // Up-Left
-                add(KeyEvent.KEYCODE_DPAD_UP)
-                add(KeyEvent.KEYCODE_DPAD_LEFT)
-            }
-            deg < 202.5 -> {                                // Left
-                add(KeyEvent.KEYCODE_DPAD_LEFT)
-            }
-            deg < 247.5 -> {                                // Down-Left
-                add(KeyEvent.KEYCODE_DPAD_LEFT)
-                add(KeyEvent.KEYCODE_DPAD_DOWN)
-            }
-            deg < 292.5 -> {                                // Down
-                add(KeyEvent.KEYCODE_DPAD_DOWN)
-            }
-            else -> {                                       // Down-Right
-                add(KeyEvent.KEYCODE_DPAD_DOWN)
-                add(KeyEvent.KEYCODE_DPAD_RIGHT)
-            }
-        }
+        val now = SystemClock.uptimeMillis()
+        val event = KeyEvent(
+            now,
+            now,
+            KeyEvent.ACTION_UP,
+            keyCode,
+            0
+        )
+        (context as? Activity)?.dispatchKeyEvent(event)
     }
 
-    private fun hitButtons(x: Float, y: Float, collector: MutableSet<Int>) {
-        val cx = buttonClusterCenterX()
-        val cy = buttonClusterCenterY()
-        val cr = buttonClusterRadius()
-        val br = buttonRadius()
+    // -----------------------------------------------------------------------
 
-        val topX = cx
-        val topY = cy - cr * 0.6f
-        val rightX = cx + cr * 0.6f
-        val rightY = cy
-        val bottomX = cx
-        val bottomY = cy + cr * 0.6f
-        val leftX = cx - cr * 0.6f
-        val leftY = cy
-
-        fun inside(cx: Float, cy: Float): Boolean {
-            val dx = x - cx
-            val dy = y - cy
-            return dx * dx + dy * dy <= br * br
-        }
-
-        // Top: A -> Android KEYCODE_A
-        if (inside(topX, topY)) {
-            collector.add(KeyEvent.KEYCODE_A)
-        }
-        // Right: X -> KEYCODE_X
-        if (inside(rightX, rightY)) {
-            collector.add(KeyEvent.KEYCODE_X)
-        }
-        // Bottom: Z -> KEYCODE_Z
-        if (inside(bottomX, bottomY)) {
-            collector.add(KeyEvent.KEYCODE_Z)
-        }
-        // Left: C -> KEYCODE_C
-        if (inside(leftX, leftY)) {
-            collector.add(KeyEvent.KEYCODE_C)
-        }
-    }
-
-    private fun updateKeys(newPressed: MutableSet<Int>) {
-        // Keys to press: in newPressed but not currently active
-        val toPress = newPressed - activeKeys
-        // Keys to release: in activeKeys but not in newPressed
-        val toRelease = activeKeys - newPressed
-
-        for (code in toPress) {
-            if (DEBUG) Log.d(TAG, "Key DOWN: $code")
-            SDLActivity.onNativeKeyDown(code)
-        }
-        for (code in toRelease) {
-            if (DEBUG) Log.d(TAG, "Key UP  : $code")
-            SDLActivity.onNativeKeyUp(code)
-        }
-
-        activeKeys.clear()
-        activeKeys.addAll(newPressed)
-    }
-
-    private fun releaseAllKeys() {
-        for (code in activeKeys) {
-            if (DEBUG) Log.d(TAG, "Releasing stuck key: $code")
-            SDLActivity.onNativeKeyUp(code)
-        }
-        activeKeys.clear()
-    }
-
-    override fun onDetachedFromWindow() {
-        super.onDetachedFromWindow()
-        releaseAllKeys()
+    private fun dp(v: Float): Float {
+        return v * resources.displayMetrics.density
     }
 }
