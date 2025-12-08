@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/virtual_pad_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clickable="false"
+    android:focusable="false">
+
+    <!-- D-PAD bottom-left -->
+    <FrameLayout
+        android:id="@+id/dpad_container"
+        android:layout_width="170dp"
+        android:layout_height="170dp"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="24dp">
+
+        <Button
+            android:id="@+id/btn_dpad_up"
+            style="@style/VirtualPadRoundButton"
+            android:text="↑"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_gravity="top|center_horizontal" />
+
+        <Button
+            android:id="@+id/btn_dpad_down"
+            style="@style/VirtualPadRoundButton"
+            android:text="↓"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_gravity="bottom|center_horizontal" />
+
+        <Button
+            android:id="@+id/btn_dpad_left"
+            style="@style/VirtualPadRoundButton"
+            android:text="←"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_gravity="center_vertical|start" />
+
+        <Button
+            android:id="@+id/btn_dpad_right"
+            style="@style/VirtualPadRoundButton"
+            android:text="→"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_gravity="center_vertical|end" />
+    </FrameLayout>
+
+    <!-- Action buttons bottom-right: X Y Z / A B C (SNES-ish layout) -->
+    <LinearLayout
+        android:id="@+id/action_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="24dp"
+        android:orientation="vertical">
+
+        <!-- Row 1: X Y Z -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_action_x"
+                style="@style/VirtualPadRoundButton"
+                android:text="X"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_margin="6dp" />
+
+            <Button
+                android:id="@+id/btn_action_y"
+                style="@style/VirtualPadRoundButton"
+                android:text="Y"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_margin="6dp" />
+
+            <Button
+                android:id="@+id/btn_action_z"
+                style="@style/VirtualPadRoundButton"
+                android:text="Z"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_margin="6dp" />
+        </LinearLayout>
+
+        <!-- Row 2: A B C -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_action_a"
+                style="@style/VirtualPadRoundButton"
+                android:text="A"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_margin="6dp" />
+
+            <Button
+                android:id="@+id/btn_action_b"
+                style="@style/VirtualPadRoundButton"
+                android:text="B"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_margin="6dp" />
+
+            <Button
+                android:id="@+id/btn_action_c"
+                style="@style/VirtualPadRoundButton"
+                android:text="C"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_margin="6dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- START button, top center -->
+    <Button
+        android:id="@+id/btn_start"
+        style="@style/VirtualPadStartButton"
+        android:text="START"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="16dp" />
+
+</FrameLayout>

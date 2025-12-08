@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Round face / d-pad buttons -->
+    <style name="VirtualPadRoundButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/virtualpad_button_round</item>
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:minHeight">0dp</item>
+        <item name="android:paddingLeft">12dp</item>
+        <item name="android:paddingRight">12dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:gravity">center</item>
+        <!-- NOTE: support attr, not android:allCaps -->
+        <item name="textAllCaps">false</item>
+    </style>
+
+    <!-- Rectangular "START" button -->
+    <style name="VirtualPadStartButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/virtualpad_button_rect</item>
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">16dp</item>
+        <item name="android:paddingTop">6dp</item>
+        <item name="android:paddingBottom">6dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:minHeight">0dp</item>
+        <item name="android:gravity">center</item>
+        <item name="textAllCaps">false</item>
+    </style>
+
+    <!-- Floating menu button (≡), stylistically similar to START -->
+    <style name="VirtualPadMenuButton" parent="VirtualPadStartButton">
+        <item name="android:paddingLeft">10dp</item>
+        <item name="android:paddingRight">10dp</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+</resources>
