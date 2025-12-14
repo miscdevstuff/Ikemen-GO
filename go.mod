@@ -17,7 +17,7 @@ require (
 	github.com/sqweek/dialog v0.0.0-20220809060634-e981b270ebbf
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
-	github.com/veandco/go-sdl2 v0.5.0-alpha.7.0.20250220045537-7f43f67a3a12
+	github.com/veandco/go-sdl2 v0.4.40
 	github.com/yuin/gopher-lua v1.1.0
 	golang.org/x/mobile v0.0.0-20221110043201-43a038452099
 	golang.org/x/text v0.20.0

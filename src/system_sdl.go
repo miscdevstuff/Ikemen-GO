@@ -402,11 +402,13 @@ func (w *Window) pollEvents() {
 		case *sdl.QuitEvent:
 			w.closeflag = true
 		case *sdl.KeyboardEvent:
-			if t.State == sdl.PRESSED {
-				OnKeyPressed(t.Keysym.Sym, t.Keysym.Mod)
-			} else if t.State == sdl.RELEASED {
-				OnKeyReleased(t.Keysym.Sym, t.Keysym.Mod)
-			}
+            // Cast explicitly to the 'ModifierKey' type expected by OnKeyPressed
+            mod := ModifierKey(t.Keysym.Mod)
+            if t.State == sdl.PRESSED {
+                OnKeyPressed(t.Keysym.Sym, mod)
+            } else if t.State == sdl.RELEASED {
+                OnKeyReleased(t.Keysym.Sym, mod)
+            }
 		case *sdl.WindowEvent:
 			if t.Event == sdl.WINDOWEVENT_EXPOSED {
 				if sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1" {
