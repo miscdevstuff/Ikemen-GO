@@ -25,7 +25,7 @@ func ShowErrorDialog(message string) {
 // TTF font loading for Android.
 func LoadFntTtf(f *Fnt, fontfile string, filename string, height int32) {
     // Search in local/game directories
-    fileDir := SearchFile(filename, []string{fontfile, sys.motifDir, "", "data/", "font/"})
+    fileDir := SearchFile(filename, []string{fontfile, sys.motif.Def, "", "data/", "font/"})
     if fp := FileExist(fileDir); len(fp) != 0 {
         fileDir = fp
     } else {
