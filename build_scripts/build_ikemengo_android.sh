@@ -332,6 +332,8 @@ build_ikemen_android() {
 
 	# 2) Make Android-built libs visible to pkg-config
 	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$LIBXMP_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+	# pkg-config for go-gl -> gl4es
+	export PKG_CONFIG_PATH="$JNI_DIR/gl4es/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 	local pc="${PKG_CONFIG:-pkg-config}"
 
 	# Flags for FFmpeg + libxmp + SDL2 (same idea as build/build.sh)
@@ -351,9 +353,6 @@ build_ikemen_android() {
 
 	# Linker flags: deps + gl4es + Android libs
 	export CGO_LDFLAGS="${deps_libs} -L$JNI_DIR -lGL_es4 -landroid -llog"
-
-	# pkg-config for go-gl -> gl4es
-	export PKG_CONFIG_PATH="$JNI_DIR/gl4es/lib/pkgconfig"
 
 	# 4) Build as c-shared for JNI
 	local out_so="$JNI_DIR/libikemen.so"

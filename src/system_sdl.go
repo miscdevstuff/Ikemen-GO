@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	"strings"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -42,7 +43,7 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	var x, y = (mode.W - w2) / 2, (mode.H - h2) / 2
 
 	window.SetResizable(true)
-	var windowFlags sdl.WindowFlags = sdl.WINDOW_INPUT_FOCUS
+	var windowFlags uint32 = sdl.WINDOW_INPUT_FOCUS
 
 	if sys.cfg.Video.RenderMode == "OpenGL 3.2" {
 		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_CORE) // only GL 3.2 needs this
@@ -86,7 +87,11 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		windowFlags |= sdl.WINDOW_BORDERLESS
 	}
 
-	window, err = sdl.CreateWindow(s.cfg.Config.WindowTitle, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, w2, h2, windowFlags)
+    title := s.cfg.Config.WindowTitle
+	if title == "" {
+		title = "Ikemen GO"
+	}
+	window, err = sdl.CreateWindow(title, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, w2, h2, windowFlags)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create window: %w", err)
 	}
@@ -123,7 +128,7 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		input.controllerstate[i] = &ControllerState{Buttons: make(map[sdl.GameControllerButton]byte)}
 	}
 
-	ret := &Window{window, s.cfg.Config.WindowTitle, int(x), int(y), w, h, fullscreen, false}
+	ret := &Window{window, title, int(x), int(y), w, h, fullscreen, false}
 	return ret, err
 }
 
@@ -288,25 +293,25 @@ func (w *Window) pollEvents() {
 	const MAX_VALUE float32 = 32768.0
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 		switch t := event.(type) {
-		case sdl.ControllerAxisEvent:
+		case *sdl.ControllerAxisEvent:
 			// FIX: Map Instance ID (t.Which) to Array Index
 			if idx := findControllerIndex(t.Which); idx != -1 {
 				input.controllerstate[idx].Axes[t.Axis] = convertI16toI8(t.Value)
 			}
-		case sdl.ControllerButtonEvent:
+		case *sdl.ControllerButtonEvent:
 			// FIX: Map Instance ID (t.Which) to Array Index
 			if idx := findControllerIndex(t.Which); idx != -1 {
-				input.controllerstate[idx].Buttons[t.Button] = byte(t.State)
+				input.controllerstate[t.Which].Buttons[sdl.GameControllerButton(t.Button)] = byte(t.State)
 			}
-		case sdl.QuitEvent:
+		case *sdl.QuitEvent:
 			w.closeflag = true
-		case sdl.KeyboardEvent:
+		case *sdl.KeyboardEvent:
 			if t.State == sdl.PRESSED {
 				OnKeyPressed(t.Keysym.Sym, t.Keysym.Mod)
 			} else if t.State == sdl.RELEASED {
 				OnKeyReleased(t.Keysym.Sym, t.Keysym.Mod)
 			}
-		case sdl.WindowEvent:
+		case *sdl.WindowEvent:
 			if t.Event == sdl.WINDOWEVENT_EXPOSED {
 				if sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1" {
 					gfx.EndFrame()
@@ -315,11 +320,13 @@ func (w *Window) pollEvents() {
 			} else if t.Event == sdl.WINDOWEVENT_CLOSE {
 				w.closeflag = true
 			}
-		case sdl.TextInputEvent:
-			if len(t.Text) > 0 {
-				OnTextEntered(t.Text)
+		case *sdl.TextInputEvent:
+		    // Text is [32]byte, convert and trim trailing NULs
+			text := strings.TrimRight(string(t.Text[:]), "\x00")
+			if len(text) > 0 {
+				OnTextEntered(text)
 			}
-		case sdl.JoyDeviceAddedEvent:
+		case *sdl.JoyDeviceAddedEvent:
 			// t.Which here IS the device index (0, 1, 2...), so this is safe
 			joyS := int(t.Which)
 			if joyS < len(input.controllers) {
@@ -328,7 +335,7 @@ func (w *Window) pollEvents() {
 					input.controllerstate[joyS].HasRumble = input.controllers[joyS].HasRumble()
 				}
 			}
-		case sdl.JoyDeviceRemovedEvent:
+		case *sdl.JoyDeviceRemovedEvent:
 			// FIX: Map Instance ID (t.Which) to Array Index
 			if idx := findControllerIndex(t.Which); idx != -1 {
 				if controller := input.controllers[idx]; controller != nil {

@@ -1,4 +1,5 @@
-//go:build !raw
+//go:build !raw && !android
+// +build !raw,!android
 
 package main
 
