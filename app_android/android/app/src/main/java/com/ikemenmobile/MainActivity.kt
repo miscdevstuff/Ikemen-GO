@@ -3,6 +3,7 @@ package com.ikemenmobile
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
+import android.system.Os
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -12,79 +13,87 @@ import android.widget.FrameLayout
 import android.widget.PopupMenu
 import androidx.appcompat.widget.AppCompatButton
 import org.libsdl.app.SDLActivity
+import java.io.File
 
 class MainActivity : SDLActivity() {
 
     private lateinit var virtualPad: VirtualGamepadLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // ---------------------------------------------------------
+        // CRITICAL FIX: Environment Setup BEFORE Native Init
+        // ---------------------------------------------------------
+        try {
+            // 1. Define Paths
+            // Use getExternalFilesDir (Android/data/...) so users can access files
+            val filesDirObj = getExternalFilesDir(null) ?: filesDir
+            
+            // Use 'tmp' directory INSIDE the game files directory
+            // This matches the logic we added to motif.go
+            val tmpDirObj = File(filesDirObj, "tmp")
+
+            // 2. Ensure Directories Exist
+            if (!tmpDirObj.exists()) {
+                tmpDirObj.mkdirs()
+            }
+
+            // 3. Set Environment Variables for Go
+            // IKEMEN_PATH: Game root
+            Os.setenv("IKEMEN_PATH", filesDirObj.absolutePath, true)
+            
+            // TMPDIR: Point to basepath/tmp so all temp files go there
+            Os.setenv("TMPDIR", tmpDirObj.absolutePath, true)
+
+            Log.v("Ikemen", "Native Env Init: IKEMEN_PATH=${filesDirObj.absolutePath} TMPDIR=${tmpDirObj.absolutePath}")
+        } catch (e: Exception) {
+            Log.e("Ikemen", "Failed to set native environment variables", e)
+        }
+        // ---------------------------------------------------------
+
         super.onCreate(savedInstanceState)
 
-        // Force landscape
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-
-        // Extract Ikemen assets before Go/SDL touches basePath
         AssetsExtractor.ensureAssetsExtracted(this)
 
-        // Root container SDL uses
         val root = window.decorView.findViewById<ViewGroup>(android.R.id.content)
-
-        // Our overlay (XML-based virtual pad)
         virtualPad = VirtualGamepadLayout(this)
-        root.addView(
-            virtualPad,
-            ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
+        root.addView(virtualPad, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        
+        setupMenuButton(root)
+        Log.d("MainActivity", "VirtualGamepadLayout attached")
+    }
 
-        // Floating menu button (≡) – always visible
+    private fun setupMenuButton(root: ViewGroup) {
         val themedCtx = ContextThemeWrapper(this, R.style.VirtualPadMenuButton)
         val menuButton = AppCompatButton(themedCtx, null, 0).apply {
             text = "≡"
             textSize = 16f
             alpha = 0.9f
-
             val density = resources.displayMetrics.density
             val size = (40f * density).toInt()
             val margin = (16f * density).toInt()
-
-            layoutParams = FrameLayout.LayoutParams(
-                size,
-                size,
-                Gravity.TOP or Gravity.START
-            ).apply {
+            layoutParams = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.START).apply {
                 setMargins(margin, margin, margin, margin)
             }
-
             setOnClickListener { showGamepadMenu(this) }
         }
-
         root.addView(menuButton)
-
-        Log.d("MainActivity", "VirtualGamepadLayout attached")
     }
 
     private fun showGamepadMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
         popup.menu.add(0, 1, 0, "Toggle gamepad")
         popup.menu.add(0, 2, 1, "Import gamepad layout (stub)")
-
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> {
-                    virtualPad.visibility =
-                        if (virtualPad.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                    virtualPad.visibility = if (virtualPad.visibility == View.VISIBLE) View.GONE else View.VISIBLE
                     true
                 }
-
                 2 -> {
-                    // Placeholder for future in-app layout editor / importer
                     Log.d("MainActivity", "Import gamepad layout – not implemented yet")
                     true
                 }
-
                 else -> false
             }
         }
@@ -101,7 +110,6 @@ class MainActivity : SDLActivity() {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     }
 
-    // SDL handles native main + GL + input
     override fun getLibraries(): Array<String> {
         return arrayOf("ikemen")
     }

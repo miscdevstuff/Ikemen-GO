@@ -14,41 +14,47 @@ static void ikm_log(const char* msg) {
 import "C"
 
 import (
-    "fmt"
-    "unsafe"
+	"fmt"
+	"os"
+	"path/filepath"
+	"unsafe"
 )
 
 //export SDL_main
-// SDL calls this instead of main() on Android.
-// It runs on the dedicated SDL thread created by SDLActivity.
 func SDL_main(argc C.int, argv **C.char) C.int {
-    argcGo := int(argc)
-    argvSlice := unsafe.Slice(argv, argcGo)
+	argcGo := int(argc)
+	argvSlice := unsafe.Slice(argv, argcGo)
 
-    // Fallback if Java didn't pass anything
-    base := "/storage/emulated/0/Android/data/com.ikemenmobile/files"
-    if argcGo > 1 && argvSlice[1] != nil {
-        base = C.GoString(argvSlice[1])
-    }
+	// 1. Get Base Path
+	var base string
+	// Priority: Env Var (from Java) > Argv (from SDL) > Fallback
+	base = os.Getenv("IKEMEN_PATH")
+	
+	if base == "" && argcGo > 1 && argvSlice[1] != nil {
+		base = C.GoString(argvSlice[1])
+	}
 
-    // Log via Android logcat
-    {
-        msg := C.CString("SDL_main(): entering Go, base=" + base)
-        C.ikm_log(msg)
-        C.free(unsafe.Pointer(msg))
-    }
+	if base == "" {
+		base = "/storage/emulated/0/Android/data/com.ikemenmobile/files"
+	}
 
-    // Also log to stdout (shows up under "E/Go" in logcat)
-    fmt.Println("[Ikemen] SDL_main(): base path =", base)
+	// 2. Setup TMPDIR to be basepath/tmp
+	// We strictly use the 'tmp' folder inside our game directory to match motif.go logic.
+	tmpDir := filepath.Join(base, "tmp")
+	
+	// Force creation of the temp directory.
+	err := os.MkdirAll(tmpDir, 0755)
 
-    // Hand off to Go-side Android entrypoint
-    RunGameAndroid(base)
+	// Force the entire Go runtime to use this safe directory for any os.TempDir() calls
+	os.Setenv("TMPDIR", tmpDir)
 
-    {
-        msg := C.CString("SDL_main(): RunGameAndroid returned, exiting")
-        C.ikm_log(msg)
-        C.free(unsafe.Pointer(msg))
-    }
+	// 3. Logging
+	msg := C.CString(fmt.Sprintf("SDL_main(): Launching. Base: %s, TMPDIR: %s, MkdirErr: %v", base, tmpDir, err))
+	C.ikm_log(msg)
+	C.free(unsafe.Pointer(msg))
 
-    return 0
+	// 4. Start Engine
+	RunGameAndroid(base)
+
+	return 0
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1484,18 +1485,41 @@ func loadMotif(def string) (*Motif, error) {
 			return fmt.Errorf("Failed to load text from %s: %w", filename, err)
 		}
 
+		// [ANDROID FIX] Helper to create temp files safely on Android
 		createTempFile := func(content string) (*os.File, error) {
-			tmp, err := os.CreateTemp("", "temp_*.ini")
+			var tmp *os.File
+			var err error
+
+			if runtime.GOOS == "android" {
+				// Android: System temp dir (/data/local/tmp) is often read-only for apps.
+				// Use a dedicated 'tmp' folder relative to the current working directory.
+				// The engine chdirs to the assets folder on boot, so "." is the writable files dir.
+				androidTmpDir := filepath.Join(".", "tmp")
+				
+				// Ensure directory exists
+				if mkErr := os.MkdirAll(androidTmpDir, 0755); mkErr != nil {
+					return nil, fmt.Errorf("failed to create android temp dir %s: %w", androidTmpDir, mkErr)
+				}
+
+				// Create a specific temp file in that directory
+				tmp, err = os.CreateTemp(androidTmpDir, "temp_motif_*.ini")
+			} else {
+				// Desktop (Windows/Linux/Mac): Use standard system temp behavior
+				tmp, err = os.CreateTemp("", "temp_*.ini")
+			}
+
 			if err != nil {
 				return nil, fmt.Errorf("could not create temporary file: %w", err)
 			}
-			// Ensure the temporary file is removed when the function exits
-			defer os.Remove(tmp.Name())
 
 			if _, err := tmp.WriteString(content); err != nil {
 				tmp.Close()
+				os.Remove(tmp.Name()) // Clean up partial file
 				return nil, fmt.Errorf("failed to write to temporary file %s: %w", tmp.Name(), err)
 			}
+			
+			// Critical: Close the file to flush content to disk before the INI parser tries to read it.
+			tmp.Close() 
 
 			return tmp, nil
 		}
@@ -1505,12 +1529,14 @@ func loadMotif(def string) (*Motif, error) {
 		if err != nil {
 			return err
 		}
+		defer os.Remove(tempDefFile.Name()) // Clean up after function exits
 
 		normalizedDefault := preprocessINIContent(NormalizeNewlines(string(defaultMotif)))
 		tempDefaultFile, err := createTempFile(normalizedDefault)
 		if err != nil {
 			return err
 		}
+		defer os.Remove(tempDefaultFile.Name()) // Clean up after function exits
 
 		// Load the INI file using the temporary files
 		iniFile, err = ini.LoadSources(options, tempDefaultFile.Name(), tempDefFile.Name())
@@ -1529,9 +1555,6 @@ func loadMotif(def string) (*Motif, error) {
 		if err != nil {
 			return fmt.Errorf("Failed to load user INI source from %s: %w", tempDefFile.Name(), err)
 		}
-
-		tempDefaultFile.Close()
-		tempDefFile.Close()
 
 		return nil
 	}); err != nil {
@@ -1561,9 +1584,7 @@ func loadMotif(def string) (*Motif, error) {
 			}
 			lang, base, has := splitLangPrefix(raw)
 			logical := base
-			// Backgrounds and [Begin Action] blocks are skipped (case-insensitive).
 			lb := strings.ToLower(logical)
-			// Skip raw BG sections which are handled by loadBGDef.
 			if strings.HasPrefix(lb, "begin ") {
 				goto nextSection
 			}
@@ -1574,18 +1595,15 @@ func loadMotif(def string) (*Motif, error) {
 				"challengerbg", "hiscorebg",
 			} {
 				if strings.HasPrefix(lb, p) {
-					// Allow BgDef sections that should be mapped into BgDefProperties.
 					if strings.HasSuffix(lb, "bgdef") {
 						break
 					}
 					goto nextSection
 				}
 			}
-			// "music" is handled separately later.
 			if strings.EqualFold(logical, "music") {
 				goto nextSection
 			}
-			// Route by language.
 			if has {
 				if lang == "en" {
 					baseSecs = append(baseSecs, secPair{s, logical})
@@ -1604,17 +1622,13 @@ func loadMotif(def string) (*Motif, error) {
 			for _, key := range section.Keys() {
 				keyName := key.Name()
 				if strings.HasPrefix(keyName, "menu.itemname.") {
-					// handled in script.go to preserve order
 					continue
 				}
 				value := key.Value()
-
-				// Normalize spaces
 				secNorm := strings.ReplaceAll(sectionName, " ", "_")
 				keyNorm := strings.ReplaceAll(keyName, " ", "_")
 
 				var keyParts []queryPart
-				// Literal sections keep dots in keys
 				if isLiteralSectionFor(&m, sectionName) {
 					keyParts = []queryPart{
 						{name: strings.ToLower(secNorm)},
@@ -1638,12 +1652,10 @@ func loadMotif(def string) (*Motif, error) {
 		}
 	}
 
-	// Apply precedence: struct defaults < defaultMotif.ini < user motif
 	assignFrom(defaultOnlyIni)
 	assignFrom(userIniFile)
 	sys.keepAlive()
 
-	// Localcoord is used during loading (before the final sys.motif assignment)
 	sys.motif.Info.Localcoord = m.Info.Localcoord
 
 	m.IniFile = iniFile
@@ -1653,17 +1665,14 @@ func loadMotif(def string) (*Motif, error) {
 		applyCustomDefaults(&m, userIniFile)
 	}
 
-	// Resolve inline fonts early, so TitleInfo.Loading can get a real font index.
 	reserveUserFontSlots(&m)
 	resolveInlineFonts(m.IniFile, m.Def, m.Fnt, m.fntIndexByKey, m.SetValueUpdate)
 	syncFontsMap(&m.Files.Font, m.Fnt, m.fntIndexByKey)
 	sys.keepAlive()
 
-	// Build the loading TextSprite and draw it before we proceed to heavier asset loads (SFF, BG, etc).
 	m.drawLoading()
 	sys.keepAlive()
 
-	// Proceed with the regular heavyweight loads.
 	m.loadFiles()
 	sys.keepAlive()
 
