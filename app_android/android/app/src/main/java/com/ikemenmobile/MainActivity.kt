@@ -25,11 +25,8 @@ class MainActivity : SDLActivity() {
         // ---------------------------------------------------------
         try {
             // 1. Define Paths
-            // Use getExternalFilesDir (Android/data/...) so users can access files
             val filesDirObj = getExternalFilesDir(null) ?: filesDir
-            
             // Use 'tmp' directory INSIDE the game files directory
-            // This matches the logic we added to motif.go
             val tmpDirObj = File(filesDirObj, "tmp")
 
             // 2. Ensure Directories Exist
@@ -44,7 +41,12 @@ class MainActivity : SDLActivity() {
             // TMPDIR: Point to basepath/tmp so all temp files go there
             Os.setenv("TMPDIR", tmpDirObj.absolutePath, true)
 
-            Log.v("Ikemen", "Native Env Init: IKEMEN_PATH=${filesDirObj.absolutePath} TMPDIR=${tmpDirObj.absolutePath}")
+            // GOGC: PERFORMANCE FIX FOR AUDIO
+            // Default is 100. Setting to 200 or 400 reduces the frequency of 
+            // Garbage Collection pauses, which prevents audio stutter/pops.
+            Os.setenv("GOGC", "200", true)
+
+            Log.v("Ikemen", "Native Env Init: IKEMEN_PATH=${filesDirObj.absolutePath} TMPDIR=${tmpDirObj.absolutePath} GOGC=200")
         } catch (e: Exception) {
             Log.e("Ikemen", "Failed to set native environment variables", e)
         }
