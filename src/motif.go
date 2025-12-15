@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1485,75 +1484,26 @@ func loadMotif(def string) (*Motif, error) {
 			return fmt.Errorf("Failed to load text from %s: %w", filename, err)
 		}
 
-		// [ANDROID FIX] Helper to create temp files safely on Android
-		createTempFile := func(content string) (*os.File, error) {
-			var tmp *os.File
-			var err error
+		// Preprocess and load INI sources from memory.
+		normalizedInput := []byte(preprocessINIContent(NormalizeNewlines(string(inputBytes))))
+		normalizedDefault := []byte(preprocessINIContent(NormalizeNewlines(string(defaultMotif))))
 
-			if runtime.GOOS == "android" {
-				// Android: System temp dir (/data/local/tmp) is often read-only for apps.
-				// Use a dedicated 'tmp' folder relative to the current working directory.
-				// The engine chdirs to the assets folder on boot, so "." is the writable files dir.
-				androidTmpDir := filepath.Join(".", "tmp")
-				
-				// Ensure directory exists
-				if mkErr := os.MkdirAll(androidTmpDir, 0755); mkErr != nil {
-					return nil, fmt.Errorf("failed to create android temp dir %s: %w", androidTmpDir, mkErr)
-				}
-
-				// Create a specific temp file in that directory
-				tmp, err = os.CreateTemp(androidTmpDir, "temp_motif_*.ini")
-			} else {
-				// Desktop (Windows/Linux/Mac): Use standard system temp behavior
-				tmp, err = os.CreateTemp("", "temp_*.ini")
-			}
-
-			if err != nil {
-				return nil, fmt.Errorf("could not create temporary file: %w", err)
-			}
-
-			if _, err := tmp.WriteString(content); err != nil {
-				tmp.Close()
-				os.Remove(tmp.Name()) // Clean up partial file
-				return nil, fmt.Errorf("failed to write to temporary file %s: %w", tmp.Name(), err)
-			}
-			
-			// Critical: Close the file to flush content to disk before the INI parser tries to read it.
-			tmp.Close() 
-
-			return tmp, nil
+		// Load merged INI: defaults first, then user (user overrides)
+		iniFile, err = ini.LoadSources(options, normalizedDefault, normalizedInput)
+		if err != nil {
+			return fmt.Errorf("Failed to load INI sources (defaults + user) from memory: %w", err)
 		}
 
-		normalizedInput := preprocessINIContent(NormalizeNewlines(string(inputBytes)))
-		tempDefFile, err := createTempFile(normalizedInput)
+		// Load defaults-only
+		defaultOnlyIni, err = ini.LoadSources(options, normalizedDefault)
 		if err != nil {
-			return err
-		}
-		defer os.Remove(tempDefFile.Name()) // Clean up after function exits
-
-		normalizedDefault := preprocessINIContent(NormalizeNewlines(string(defaultMotif)))
-		tempDefaultFile, err := createTempFile(normalizedDefault)
-		if err != nil {
-			return err
-		}
-		defer os.Remove(tempDefaultFile.Name()) // Clean up after function exits
-
-		// Load the INI file using the temporary files
-		iniFile, err = ini.LoadSources(options, tempDefaultFile.Name(), tempDefFile.Name())
-		if err != nil {
-			return fmt.Errorf("Failed to load INI sources from %s and %s: %w", tempDefaultFile.Name(), tempDefFile.Name(), err)
+			return fmt.Errorf("Failed to load defaults-only INI from memory: %w", err)
 		}
 
-		// Also keep a defaults-only INI, so we can apply it before user overrides.
-		defaultOnlyIni, err = ini.LoadSources(options, tempDefaultFile.Name())
+		// Load user-only
+		userIniFile, err = ini.LoadSources(options, normalizedInput)
 		if err != nil {
-			return fmt.Errorf("Failed to load defaults-only INI from %s: %w", tempDefaultFile.Name(), err)
-		}
-
-		// Load user-only INI to know which keys the user actually provided in system.def
-		userIniFile, err = ini.LoadSources(options, tempDefFile.Name())
-		if err != nil {
-			return fmt.Errorf("Failed to load user INI source from %s: %w", tempDefFile.Name(), err)
+			return fmt.Errorf("Failed to load user INI source from memory: %w", err)
 		}
 
 		return nil
