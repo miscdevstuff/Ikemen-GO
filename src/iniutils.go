@@ -60,6 +60,77 @@ func ResolveLangSectionName(f *ini.File, section string, lang string) string {
 	return section
 }
 
+// ResolveLangSectionNames returns section names in overlay order:
+// base [Section] first, then [<lang>.Section] (if present).
+func ResolveLangSectionNames(f *ini.File, section string, lang string) []string {
+	if f == nil || section == "" {
+		return []string{section}
+	}
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	out := make([]string, 0, 2)
+
+	// Base section first (if it exists)
+	if _, err := f.GetSection(section); err == nil {
+		out = append(out, section)
+	}
+
+	// Language override section second (if it exists)
+	if lang != "" {
+		ls := lang + "." + section
+		if _, err := f.GetSection(ls); err == nil {
+			out = append(out, ls)
+		}
+	}
+
+	// If neither exists, keep original name as a best-effort fallback.
+	if len(out) == 0 {
+		out = append(out, section)
+	}
+	return out
+}
+
+// pickLangSectionMerged returns a synthetic section that behaves like:
+// [Section] with keys overwritten by [<lang>.Section] (if present).
+func pickLangSectionMerged(f *ini.File, sec string) *ini.Section {
+	if f == nil || sec == "" {
+		return nil
+	}
+	lang := strings.ToLower(strings.TrimSpace(SelectedLanguage()))
+	var baseSec, langSec *ini.Section
+	if s, err := f.GetSection(sec); err == nil && s != nil {
+		baseSec = s
+	}
+	if lang != "" {
+		if s, err := f.GetSection(lang + "." + sec); err == nil && s != nil {
+			langSec = s
+		}
+	}
+	if baseSec == nil {
+		return langSec
+	}
+	if langSec == nil {
+		return baseSec
+	}
+
+	// Build a synthetic merged section: base keys first, then lang overrides.
+	tmp := ini.Empty()
+	merged, _ := tmp.NewSection(sec)
+	for _, k := range baseSec.Keys() {
+		_, _ = merged.NewKey(k.Name(), k.Value())
+	}
+	for _, k := range langSec.Keys() {
+		if merged.HasKey(k.Name()) {
+			mk, _ := merged.GetKey(k.Name())
+			if mk != nil {
+				mk.SetValue(k.Value())
+			}
+		} else {
+			_, _ = merged.NewKey(k.Name(), k.Value())
+		}
+	}
+	return merged
+}
+
 // pickLangSection returns the INI section to use for a logical section name,
 // honoring language-specific overrides if present.
 func pickLangSection(f *ini.File, sec string) *ini.Section {
@@ -2518,6 +2589,36 @@ func (h *BgmProperties) maxSize() int {
 	return maxLen
 }
 
+// Split a [Music] key into (prefix, property) while allowing dots in prefix.
+func splitMusicKey(rawKey string) (prefix string, property string) {
+	k := strings.TrimSpace(rawKey)
+	if k == "" {
+		return "", ""
+	}
+	kl := strings.ToLower(k)
+
+	// Find the last occurrence of a known music anchor so that prefixes can contain dots.
+	anchors := []string{".bgmusic", ".music", ".bgm"}
+	best := -1
+	for _, a := range anchors {
+		if i := strings.LastIndex(kl, a); i > best {
+			best = i
+		}
+	}
+
+	if best >= 0 {
+		prefix = strings.TrimSpace(k[:best])
+		property = strings.TrimSpace(kl[best+1:]) // without leading dot
+		return prefix, property
+	}
+
+	// Fallback
+	if dotIdx := strings.Index(k, "."); dotIdx >= 0 {
+		return strings.TrimSpace(k[:dotIdx]), strings.TrimSpace(strings.ToLower(k[dotIdx+1:]))
+	}
+	return "", strings.ToLower(k)
+}
+
 func parseMusicSection(section *ini.Section) Music {
 	// If section is nil, just return empty Music
 	if section == nil {
@@ -2544,16 +2645,12 @@ func parseMusicSection(section *ini.Section) Music {
 			continue
 		}
 
-		// Split into prefix and property
-		prefix := ""
-		property := rawKey
-		if dotIdx := strings.Index(rawKey, "."); dotIdx >= 0 {
-			prefix = strings.ToLower(rawKey[:dotIdx])
-			property = strings.ToLower(rawKey[dotIdx+1:])
-		} else {
-			// entire rawKey is the property
-			property = strings.ToLower(rawKey)
-		}
+		// Split into prefix and property, allowing dots inside prefix.
+		prefixRaw, property := splitMusicKey(rawKey)
+
+		// Normalize prefix: lower-case + flatten dots to underscores
+		prefix := strings.ToLower(prefixRaw)
+		prefix = strings.ReplaceAll(prefix, ".", "_")
 
 		// Split comma-separated values
 		values := strings.Split(rawVal, ",")

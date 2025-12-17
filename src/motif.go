@@ -1533,7 +1533,11 @@ func loadMotif(def string) (*Motif, error) {
 				continue
 			}
 			lang, base, has := splitLangPrefix(raw)
-			logical := base
+			logical := raw
+			if has {
+				logical = base
+			}
+			// Backgrounds and [Begin Action] blocks are skipped (case-insensitive).
 			lb := strings.ToLower(logical)
 			if strings.HasPrefix(lb, "begin ") {
 				goto nextSection
@@ -1555,9 +1559,7 @@ func loadMotif(def string) (*Motif, error) {
 				goto nextSection
 			}
 			if has {
-				if lang == "en" {
-					baseSecs = append(baseSecs, secPair{s, logical})
-				} else if lang == curLang {
+				if lang == curLang {
 					langSecs = append(langSecs, secPair{s, logical})
 				}
 			} else {
@@ -1640,7 +1642,7 @@ func loadMotif(def string) (*Motif, error) {
 	m.populateDataPointers()
 	m.applyPostParsePosAdjustments()
 
-	m.Music = parseMusicSection(pickLangSection(iniFile, "Music"))
+	m.Music = parseMusicSection(pickLangSectionMerged(iniFile, "Music"))
 	m.Music.DebugDump("Motif [Music]")
 
 	return &m, nil
@@ -3008,6 +3010,7 @@ type MotifContinue struct {
 	initialized bool
 	counter     int32
 	endTimer    int32
+	showEndAnim bool
 	credits     int32
 	yesSide     bool
 	selected    bool
@@ -3022,6 +3025,7 @@ func (co *MotifContinue) reset(m *Motif) {
 	co.yesSide = true
 	co.selected = false
 	co.endTimer = -1
+	co.showEndAnim = false
 	sys.applyFightAspect()
 }
 
@@ -3079,7 +3083,7 @@ func (co *MotifContinue) init(m *Motif) {
 
 	co.yesSide = true
 
-	if m.ContinueScreen.Sounds.Enabled {
+	if !m.ContinueScreen.Sounds.Enabled {
 		sys.clearAllSound()
 		sys.noSoundFlg = true
 	}
@@ -3090,6 +3094,7 @@ func (co *MotifContinue) init(m *Motif) {
 	co.counter = 0
 	co.active = true
 	co.initialized = true
+	co.showEndAnim = false
 }
 
 func (co *MotifContinue) processSelection(m *Motif, continueSelected bool) {
@@ -3153,8 +3158,21 @@ func (co *MotifContinue) step(m *Motif) {
 		}
 	}
 
-	if !co.selected {
+	// Keep the counter anim running while showing the integrated end/gameover tail.
+	if !co.selected || co.showEndAnim {
 		m.ContinueScreen.Counter.AnimData.Update()
+	}
+
+	// If we're showing the integrated end/gameover tail (gameover.enabled = 0),
+	// defer fadeout until the counter animation reaches endtime.
+	if co.selected && co.showEndAnim && co.endTimer == -1 &&
+		m.ContinueScreen.Counter.EndTime > 0 &&
+		co.counter >= m.ContinueScreen.Counter.EndTime {
+		startFadeOut(m.ContinueScreen.FadeOut.FadeData, m.fadeOut, false, m.fadePolicy)
+		co.endTimer = co.counter + m.fadeOut.timeRemaining
+	}
+
+	if !co.selected {
 		if m.ContinueScreen.LegacyMode.Enabled {
 			if m.button(m.ContinueScreen.Move.Key, co.pn-1) {
 				m.Snd.play(m.ContinueScreen.Move.Snd, 100, 0, 0, 0, 0)
@@ -3175,7 +3193,23 @@ func (co *MotifContinue) step(m *Motif) {
 				co.playCounterSounds(m)
 			} else if co.counter == m.ContinueScreen.Counter.End.SkipTime {
 				m.Snd.play(m.ContinueScreen.Counter.End.Snd, 100, 0, 0, 0, 0)
-				co.processSelection(m, false)
+				m.Music.Play("continue.end", sys.motif.Def)
+				// If separate gameover screen is disabled, the end/gameover portion is integrated into the same counter animation.
+				// Let it play to endtime, then fade out.
+				if !m.ContinueScreen.GameOver.Enabled {
+					cs := m.ContinueScreen
+					m.processStateTransitions(
+						cs.P2.No.State,
+						cs.P2.Teammate.No.State,
+						cs.P1.No.State,
+						cs.P1.Teammate.No.State,
+					)
+					co.selected = true
+					co.showEndAnim = true
+					// fadeout will be started when counter reaches Counter.EndTime
+				} else {
+					co.processSelection(m, false)
+				}
 			}
 		}
 	}
@@ -3219,7 +3253,7 @@ func (co *MotifContinue) draw(m *Motif, layerno int16) {
 	// Mugen style
 	if m.ContinueScreen.LegacyMode.Enabled {
 		co.drawLegacyMode(m, layerno)
-	} else if !co.selected {
+	} else if !co.selected || co.showEndAnim {
 		// Arcade style Counter
 		m.ContinueScreen.Counter.AnimData.Draw(layerno)
 	}
@@ -5138,8 +5172,10 @@ func (vi *MotifVictory) clear(m *Motif) {
 	vi.clearProps(&m.VictoryScreen.P8)
 }
 
-func (vi *MotifVictory) getVictoryQuote(m *Motif) string {
-	p := sys.chars[sys.winnerTeam()-1][0]
+func (vi *MotifVictory) getVictoryQuote(m *Motif, p *Char) string {
+	if p == nil || p.playerNo < 0 || p.playerNo >= len(sys.cgi) {
+		return m.VictoryScreen.WinQuote.Text
+	}
 	quoteIndex := int(p.winquote)
 	playerQuotes := sys.cgi[p.playerNo].quotes
 
@@ -5362,7 +5398,11 @@ func (vi *MotifVictory) init(m *Motif) {
 		vi.applyEntry(m, lSlots[i], lEntries[i], lNames[i])
 	}
 
-	vi.text = vi.getVictoryQuote(m)
+	var leader *Char
+	if len(wEntries) > 0 {
+		leader = wEntries[0].c
+	}
+	vi.text = vi.getVictoryQuote(m, leader)
 	m.VictoryBgDef.BGDef.Reset()
 
 	//fmt.Printf("[Victory] init done. Winners=%d entries, Losers=%d entries. WinQuote=%q\n", len(wEntries), len(lEntries), vi.text)
@@ -5373,7 +5413,7 @@ func (vi *MotifVictory) init(m *Motif) {
 		m.processStateTransitions(m.VictoryScreen.P2.State, m.VictoryScreen.P2.Teammate.State, m.VictoryScreen.P1.State, m.VictoryScreen.P1.Teammate.State)
 	}
 
-	if m.VictoryScreen.Sounds.Enabled {
+	if !m.VictoryScreen.Sounds.Enabled {
 		sys.clearAllSound()
 		sys.noSoundFlg = true
 	}
@@ -5563,11 +5603,10 @@ func victoryPortraitAnim(m *Motif, sc *SelectChar, slot string,
 
 	//fmt.Printf("[Victory] buildPortrait slot=%s scNil=%v animNo=%d spr=(%d,%d) pos=(%.1f,%.1f) scale=(%.3f,%.3f) localcoord=(%d,%d) window=(%d,%d,%d,%d) applyPal=%v pal=%d\n", slot, sc == nil, animNo, spr[0], spr[1], x, y, scale[0], scale[1], localcoord[0], localcoord[1], window[0], window[1], window[2], window[3], applyPal, pal)
 
-	if sc == nil {
-		return nil
-	}
+	a := NewAnim(nil, "")
+
 	var animCopy *Animation
-	if animNo >= 0 {
+	if sc != nil && animNo >= 0 {
 		// First: explicit animation number
 		animCopy = sc.anims.get(animNo, -1)
 		if animCopy == nil {
@@ -5577,7 +5616,7 @@ func victoryPortraitAnim(m *Motif, sc *SelectChar, slot string,
 				//fmt.Printf("[Victory] slot=%s -> fallback from anim %d to %s\n", slot, animNo/*, from*/)
 			}
 		}
-	} else if spr[0] >= 0 {
+	} else if sc != nil && spr[0] >= 0 {
 		// Try requested (grp,idx) first (preloaded or SFF-build), then fall back to 9000,1
 		want := [][2]int32{{spr[0], spr[1]}, {9000, 1} /*, {9000, 0}*/}
 		if a, _ /*from*/ := tryGetPortrait(sc, ownerC, want); a != nil {
@@ -5593,8 +5632,6 @@ func victoryPortraitAnim(m *Motif, sc *SelectChar, slot string,
 			}
 		}
 	}
-	// Always return a non-nil *Anim. If we couldn't resolve a real anim, fall back to a safe dummy created by NewAnim.
-	a := NewAnim(nil, "")
 	if animCopy != nil {
 		a.anim = animCopy
 	} else {
@@ -5617,15 +5654,20 @@ func victoryPortraitAnim(m *Motif, sc *SelectChar, slot string,
 	// Position
 	a.SetPos(x, y)
 	// Scale: include character portraitscale and coord conversion similar to hiscore
-	sx := scale[0] * sc.portraitscale * float32(sys.motif.Info.Localcoord[0]) / sc.localcoord[0]
-	sy := scale[1] * sc.portraitscale * float32(sys.motif.Info.Localcoord[0]) / sc.localcoord[0]
+	sx, sy := scale[0], scale[1]
+	// Only apply SelectChar scaling if sc is present and has valid localcoord.
+	if sc != nil && sc.localcoord[0] > 0 {
+		base := float32(sys.motif.Info.Localcoord[0]) / sc.localcoord[0]
+		sx = scale[0] * sc.portraitscale * base
+		sy = scale[1] * sc.portraitscale * base
+	}
 	a.SetScale(sx, sy)
 	a.facing = float32(facing)
 	if sx == 0 || sy == 0 {
 		//fmt.Printf("[Victory] slot=%s -> WARNING: zero scale sx=%.4f sy=%.4f (check portraitscale/localcoord)\n", slot, sx, sy)
 	}
 	// Palette for non-loaded (or force-apply if requested)
-	if applyPal && pal > 0 && a.anim.sff != nil {
+	if applyPal && pal > 0 && a.anim != nil && a.anim.sff != nil {
 		if len(a.anim.sff.palList.paletteMap) > 0 {
 			a.anim.sff.palList.paletteMap[0] = pal - 1
 		}
@@ -5690,7 +5732,7 @@ func (wi *MotifWin) init(m *Motif) {
 	}
 	sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
 
-	if wi.soundsEnabled {
+	if !wi.soundsEnabled {
 		sys.clearAllSound()
 		sys.noSoundFlg = true
 	}
