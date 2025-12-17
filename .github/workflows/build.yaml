@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install build-essential pkg-config autoconf automake libtool libtool-bin nasm yasm git make golang libasound2-dev
+          sudo apt install build-essential pkg-config autoconf automake libtool libtool-bin nasm yasm git make golang libasound2-dev jq
 
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
@@ -64,9 +64,19 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ikemen-go-android
-          path: app_android/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7
+      - name: Upload APK to file.io
+        if: success() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+        run: |
+          zip app-debug.zip app_android/android/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app-debug.zip
+          UPLOAD_URL=$(curl -F "file=@app-debug.zip" https://file.io\?expires=1 | jq -r '.link')
+          echo "Download link: $UPLOAD_URL (expires in 1 day)"
+        # env:
+          # Outputs the link in logs for easy copy-paste
+
+#       - name: Upload APK
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: ikemen-go-android
+#           path: app_android/android/app/build/outputs/apk/debug/app-debug.apk
+#           retention-days: 1
