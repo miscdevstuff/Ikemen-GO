@@ -1149,6 +1149,7 @@ type SoundChannel struct {
 	group             int32
 	number            int32
 	timeStamp         int32
+	sdlChannel        int
 }
 
 func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul float32, loopStart, loopEnd, startPosition int) {
@@ -1165,8 +1166,6 @@ func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul flo
 			s.timeStamp = sys.gameTime()
 
 			// 1. Loop Logic
-			// Beep: loop < 0 is infinite. SDL: loop = -1 is infinite.
-			// Beep: loop = 1 is play once. SDL: loop = 0 is play once.
 			sdlLoop := int(0)
 			if loop < 0 {
 				sdlLoop = -1
@@ -1175,27 +1174,20 @@ func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul flo
 			}
 
 			// 2. Play on specific channel (-1 = first free)
-			// We play it first to get the channel ID back
+			// Store the returned channel ID so we can track it later
 			channel, _ := sound.chunk.Play(-1, sdlLoop)
+			s.sdlChannel = channel
 
-			// 3. Apply Effects (If channel was allocated)
+			// 3. Apply Effects
 			if channel != -1 {
-				// Volume: Default to Max (128). The actual s.sfx.volume is applied later in Process() usually,
-				// but we can start strong here.
+				// Default to Max (128). SetVolume can adjust it later.
 				mix.Volume(channel, 128)
-
-				// Seek: Unfortunately, Mix_Chunk doesn't support seeking easily once loaded.
-				// However, if startPosition > 0, we can't easily jump there without raw byte manipulation.
-				// For SFX, startPosition is usually 0. If it's critical, we'd need a workaround.
-				
-				// Store the SDL Channel ID so we can stop it later if needed
-				// You might need to add 'sdlChannel int' to SoundChannel struct
-				// s.sdlChannel = channel 
 			}
 		}
 		return
 	}
 
+    // Desktop/Beep Logic (Unchanged)
 	s.sound = sound
 	s.group = group
 	s.number = number
@@ -1209,7 +1201,6 @@ func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul flo
 		loopCount = MaxI(0, int(loop-1))
 	}
 
-	// going to continue using our streamLooper which is now modified from beep.Loop2
 	looper := newStreamLooper(s.streamer, loopCount, loopStart, loopEnd)
 	s.sfx = &SoundEffect{streamer: looper, volume: 256, priority: 0, channel: -1, loop: int32(loopCount), freqmul: freqmul, startPos: startPosition}
 	srcRate := s.sound.format.SampleRate
@@ -1239,9 +1230,11 @@ func (s *SoundChannel) SetPaused(pause bool) {
 
 func (s *SoundChannel) Stop() {
 	if runtime.GOOS == "android" {
-		// Android: Just clear the reference. SDL_mixer manages the actual channel lifetime.
-		// If we really need to halt, we'd need to track the channel ID returned by Play.
-		s.sound = nil
+		if s.sound != nil {
+			// Actually halt the hardware channel
+			mix.HaltChannel(s.sdlChannel)
+			s.sound = nil
+		}
 		return
 	}
 	// Desktop
@@ -1255,10 +1248,16 @@ func (s *SoundChannel) Stop() {
 
 func (s *SoundChannel) SetVolume(vol float32) {
 	if runtime.GOOS == "android" {
-		// Prevent crash on Android by ignoring volume changes for now
-		// (To implement this, you'd need to store the SDL channel ID)
+		if s.sound != nil {
+			// Map engine volume (0-256) to SDL volume (0-128)
+			sdlVol := int(vol / 2)
+			if sdlVol > 128 { sdlVol = 128 }
+			if sdlVol < 0 { sdlVol = 0 }
+			mix.Volume(s.sdlChannel, sdlVol)
+		}
 		return
 	}
+	// Desktop
 	if s.ctrl != nil && s.sfx != nil {
 		s.sfx.volume = ClampF(vol, 0, 512)
 	}
@@ -1468,14 +1467,22 @@ func (s *SoundChannels) Tick() {
 	for i := range s.channels {
 		v := &s.channels[i]
 
-		// FIX: Skip Beep stream logic on Android to avoid Nil Pointer Dereference.
-		// SDL_mixer handles audio on its own thread, so we don't need to tick streams here.
+		// FIX: Android Channel Lifecycle Management
 		if runtime.GOOS == "android" {
+			// If we have a sound marked as active, check if SDL is still actually playing it.
+			if v.sound != nil {
+				// mix.Playing(channel) returns 1 if playing, 0 if finished/stopped.
+				if mix.Playing(v.sdlChannel) == 0 {
+					// The sound finished natively; clear it so this SoundChannel slot is free for new sounds.
+					v.sound = nil
+				}
+			}
 			continue
 		}
 
+		// Desktop Logic (Unchanged)
 		if v.IsPlaying() {
-			if v.streamer.Position() >= v.sound.length && v.sfx.loop != -1 { // End the sound
+			if v.streamer.Position() >= v.sound.length && v.sfx.loop != -1 { 
 				v.sound = nil
 			}
 		}
