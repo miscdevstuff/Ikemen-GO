@@ -20,6 +20,7 @@ import (
 
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/speaker"
+	"github.com/veandco/go-sdl2/mix"
 	//glfont "github.com/ikemen-engine/glfont"
 	lua "github.com/yuin/gopher-lua"
 )
@@ -414,7 +415,19 @@ func (s *System) init(w, h int32) *lua.LState {
 	gfxFont.Init(gfx)
 	gfx.BeginFrame(false)
 	// And the audio.
-	speaker.Init(beep.SampleRate(sys.cfg.Sound.SampleRate), sys.cfg.Sound.BufferSize)
+	// --- AUDIO INIT ---
+	if runtime.GOOS == "android" {
+		// Use Config values, but cast them to int for SDL
+		rate := int(sys.cfg.Sound.SampleRate)
+		buf := int(sys.cfg.Sound.BufferSize)
+		if err := mix.OpenAudio(rate, mix.DEFAULT_FORMAT, 2, buf); err != nil {
+			sys.errLog.Printf("SDL_mixer init failed: %v", err)
+		}
+		mix.AllocateChannels(32)
+	} else {
+		// PC Default
+		speaker.Init(beep.SampleRate(sys.cfg.Sound.SampleRate), sys.cfg.Sound.BufferSize)
+	}
 	// Conditional Normalizer to save CPU
 	if sys.cfg.Sound.Normalizer {
 	    speaker.Play(NewNormalizer(s.soundMixer)) // High Quality: Prevents clipping but uses floating-point math (Higher CPU usage)

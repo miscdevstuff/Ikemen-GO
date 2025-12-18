@@ -311,7 +311,9 @@ build_sdl2_android() {
 		--prefix="$SDL2_PREFIX" \
 		--enable-shared \
 		--disable-static \
-		--disable-audio \
+		--enable-audio \
+		--enable-audio-opensles \
+		--enable-audio-aaudio \
 		--enable-video-opengl \
 		--disable-hidapi \
 		CC="$CC" \
@@ -330,6 +332,37 @@ build_sdl2_android() {
 	echo "==> SDL2 installed to: $SDL2_PREFIX"
 	ls -R "$SDL2_PREFIX" || true
 
+	popd > /dev/null
+}
+
+# --------------------------------------------------------------------
+# SDL2_mixer build (Hardware mixing for Android)
+# --------------------------------------------------------------------
+build_sdl2_mixer_android() {
+	local srcdir="$REPO_ROOT/build/sdl2-mixer-src"
+	# Use 2.8.0 for built-in dr_mp3/stb_vorbis support
+	local url="https://github.com/libsdl-org/SDL_mixer/releases/download/release-2.8.0/SDL2_mixer-2.8.0.tar.gz"
+
+	echo "==> Building SDL2_mixer for Android"
+	download_and_extract "$url" "$srcdir"
+	pushd "$srcdir" > /dev/null
+
+	export CFLAGS="-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include -I$SDL2_PREFIX/include/SDL2"
+	export LDFLAGS="-L$SDL2_PREFIX/lib -L$LIBXMP_PREFIX/lib"
+
+	./configure \
+		--host="$ANDROID_TRIPLE" \
+		--prefix="$SDL2_PREFIX" \
+		--enable-shared --disable-static \
+		--disable-music-midi-native --disable-music-midi-fluidsynth \
+		--enable-music-mod-xmp --disable-music-mod-modplug --with-xmp-prefix="$LIBXMP_PREFIX" \
+		--enable-music-ogg-stb --enable-music-mp3-drmp3 --enable-music-flac-drflac \
+		--disable-music-opus --disable-music-wave \
+		--with-sdl-prefix="$SDL2_PREFIX" \
+		CC="$CC" AR="$AR" RANLIB="$RANLIB"
+
+	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
+	make install
 	popd > /dev/null
 }
 
@@ -435,6 +468,7 @@ build_ikemen_android() {
 	build_ffmpeg_android
 	build_libxmp_android
 	build_sdl2_android
+	build_sdl2_mixer_android
 
 	# 2) Make Android-built libs visible to pkg-config
 	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:$GL4ES_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
@@ -444,7 +478,7 @@ build_ikemen_android() {
 	local deps_cflags
 	local deps_libs
 	deps_cflags="$($pc --cflags libavformat libavcodec libavutil libswscale libswresample libavfilter sdl2 gl)"
-	deps_libs="$($pc --libs libavformat libavcodec libavutil libswscale libswresample libavfilter sdl2)"
+	deps_libs="$($pc --libs libavformat libavcodec libavutil libswscale libswresample libavfilter SDL2_mixer sdl2)"
 
 	# 3) Go / CGO setup
 	export GOOS=android
@@ -456,11 +490,11 @@ build_ikemen_android() {
 	X11_Mocks="-DDisplay=void -DXVisualInfo=void -DXID=long -DWindow=long -DPixmap=long -DFont=long -DBool=int -DStatus=int -DColormap=long"
 	export CGO_CFLAGS="${deps_cflags} -I$GL4ES_PREFIX/include -I$LIBXMP_PREFIX/include -DANDROID -fPIC -DNOX11 -DGLX_STUBS -DUSE_ES2 -DUSE_EGL -DNO_GBM -DOBOE_ENABLE_AAUDIO=1 $X11_Mocks"
 
-    # C++ flags
-    export CGO_CXXFLAGS="-DANDROID -fPIC -DOBOE_ENABLE_AAUDIO=1"
+	# C++ flags
+	export CGO_CXXFLAGS="-DANDROID -fPIC -DOBOE_ENABLE_AAUDIO=1"
 
 	# Linker flags: shared deps + Android libs + static libxmp gl4es
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog -lm -ldl -lEGL -lGLESv2 -laaudio"
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog -lm -ldl -lEGL -lGLESv2 -laaudio -lOpenSLES"
 
 	# 4) Build as c-shared for JNI, add `-s -w` in ldflags to strip debug symbols
 	local out_so="$JNI_DIR/libikemen.so"

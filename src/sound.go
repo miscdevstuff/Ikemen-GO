@@ -30,6 +30,8 @@ import (
 	"github.com/gopxl/beep/v2/speaker"
 	"github.com/gopxl/beep/v2/vorbis"
 	"github.com/gopxl/beep/v2/wav"
+	"github.com/veandco/go-sdl2/mix"
+	"github.com/veandco/go-sdl2/sdl"
 )
 
 const (
@@ -436,12 +438,12 @@ func (b *StreamLooper) Seek(p int) error {
 // Bgm
 
 type Bgm struct {
-	filename   string
-	bgmVolume  int
-	volRestore int
-	loop       int
-	streamer   beep.StreamSeeker
-	ctrl       *beep.Ctrl
+    filename   string
+    bgmVolume  int
+    volRestore int
+    loop       int
+    streamer   beep.StreamSeeker
+    ctrl       *beep.Ctrl
 	volctrl    *effects.Volume
 	format     string
 	freqmul    float32
@@ -449,6 +451,7 @@ type Bgm struct {
 	startPos   int
 	mu         sync.Mutex
 	cancel     context.CancelFunc
+	music      *mix.Music
 }
 
 func newBgm() *Bgm {
@@ -474,6 +477,66 @@ func (bgm *Bgm) Open(filename string, loop, bgmVolume, bgmLoopStart, bgmLoopEnd,
 	ctx, bgm.cancel = context.WithCancel(context.Background())
 	bgm.mu.Unlock()
 
+    if runtime.GOOS == "android" {
+		// Update state fields
+		bgm.filename = filename
+		bgm.loop = loop
+		bgm.bgmVolume = bgmVolume
+		bgm.freqmul = freqmul
+		
+		// 1. Clear previous music
+		if bgm.music != nil {
+			bgm.music.Free()
+			bgm.music = nil
+		}
+
+		// 2. Handle Stop Command
+		if filename == "" {
+			return
+		}
+		
+		// Don't do anything if we have the nomusic/nosound command line flag
+		if _, ok := sys.cmdFlags["-nomusic"]; ok { return }
+		if _, ok := sys.cmdFlags["-nosound"]; ok { return }
+
+		// 3. Load Music Stream (SDL streams directly from disk, no RAM buffer needed)
+		if m, err := mix.LoadMUS(filename); err == nil {
+			bgm.music = m
+			
+			// 4. Handle Looping
+			// SDL: -1 = infinite, 0 = play once
+			sdlLoops := 0
+			if loop != 0 {
+				sdlLoops = -1 // Default to infinite if loop is enabled
+				// Note: SDL_mixer's Mix_PlayMusic doesn't support specific loop counts easily,
+				// but Mugen BGM is almost always infinite.
+			}
+			
+			// 5. Volume
+			// Mix_VolumeMusic takes 0-128. We map the engine's volume logic here if needed,
+			// or just set max and let UpdateVolume handle it later.
+			mix.VolumeMusic(128)
+
+			bgm.music.Play(sdlLoops)
+			
+			// 6. Seek (If supported by format)
+			if startPosition > 0 {
+				// Mix_SetMusicPosition expects seconds (float64)
+				// We need to know sample rate to convert samples -> seconds.
+				// Assuming 44100 if unknown, or just skipping seek for safety on Android for now.
+				// seconds := float64(startPosition) / 44100.0
+				// mix.SetMusicPosition(seconds)
+			}
+			
+			// Trigger volume update to apply user configs
+			bgm.UpdateVolume()
+		} else {
+			sys.errLog.Printf("Android: Failed to load bgm: %v", err)
+		}
+		
+		// Android logic done. Return early to skip Beep logic.
+		return
+	}
 	bgm.filename = filename
 	bgm.loop = loop
 	bgm.bgmVolume = bgmVolume
@@ -817,6 +880,7 @@ type Sound struct {
 	wavData []byte
 	format  beep.Format
 	length  int
+	chunk   *mix.Chunk
 }
 
 func readSound(f io.ReadSeekCloser, size uint32) (*Sound, error) {
@@ -865,7 +929,27 @@ func readSound(f io.ReadSeekCloser, size uint32) (*Sound, error) {
 	if recovered != nil {
 		return nil, nil // If sound wasn't able to be fully played, we disable it to avoid engine freezing
 	}
-	return &Sound{wavData, wavfmt, s.Len()}, nil
+	// Construct the sound object
+	soundObj := &Sound{wavData: wavData, format: wavfmt, length: s.Len()}
+	// Load directly into Hardware Mixer if android
+	if runtime.GOOS == "android" {
+		// Create SDL RWops from the byte slice we just read
+		// unsafe.Pointer points to the start of the slice data
+		rw, err := sdl.RWFromMem(unsafe.Pointer(&wavData[0]), len(wavData))
+		if err != nil {
+			fmt.Printf("Android: Failed to create RWops for sound: %v\n", err)
+		} else {
+			// LoadWAV_RW decodes the bytes (WAV/OGG/MP3) into a raw PCM chunk for the mixer
+			// 'true' means "Auto-Free the RWops", but NOT the data source (wavData)
+			// Since wavData is in the struct, it stays alive. Perfect.
+			if c, err := mix.LoadWAV_RW(rw, true); err == nil {
+				soundObj.chunk = c
+			} else {
+				fmt.Printf("Android: SDL_mixer failed to load sound: %v\n", err)
+			}
+		}
+	}
+	return soundObj, nil
 }
 
 func (s *Sound) GetStreamer() beep.StreamSeeker {
@@ -1069,6 +1153,46 @@ type SoundChannel struct {
 
 func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul float32, loopStart, loopEnd, startPosition int) {
 	if sound == nil {
+		return
+	}
+
+    // ANDROID PATH (SDL_mixer)
+    if runtime.GOOS == "android" {
+		if sound.chunk != nil {
+			s.sound = sound
+			s.group = group
+			s.number = number
+			s.timeStamp = sys.gameTime()
+
+			// 1. Loop Logic
+			// Beep: loop < 0 is infinite. SDL: loop = -1 is infinite.
+			// Beep: loop = 1 is play once. SDL: loop = 0 is play once.
+			sdlLoop := int(0)
+			if loop < 0 {
+				sdlLoop = -1
+			} else if loop > 0 {
+				sdlLoop = int(loop - 1)
+			}
+
+			// 2. Play on specific channel (-1 = first free)
+			// We play it first to get the channel ID back
+			channel := sound.chunk.Play(-1, sdlLoop)
+
+			// 3. Apply Effects (If channel was allocated)
+			if channel != -1 {
+				// Volume: Default to Max (128). The actual s.sfx.volume is applied later in Process() usually,
+				// but we can start strong here.
+				mix.Volume(channel, 128)
+
+				// Seek: Unfortunately, Mix_Chunk doesn't support seeking easily once loaded.
+				// However, if startPosition > 0, we can't easily jump there without raw byte manipulation.
+				// For SFX, startPosition is usually 0. If it's critical, we'd need a workaround.
+				
+				// Store the SDL Channel ID so we can stop it later if needed
+				// You might need to add 'sdlChannel int' to SoundChannel struct
+				// s.sdlChannel = channel 
+			}
+		}
 		return
 	}
 

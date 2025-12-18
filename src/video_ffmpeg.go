@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"runtime"
 	"strings"
 	"time"
 
@@ -175,7 +176,7 @@ func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf Bg
 
 	// Try to open the first audio stream, if any
 	audioStreams := bgv.media.AudioStreams()
-	if len(audioStreams) > 0 {
+	if len(audioStreams) > 0 && runtime.GOOS != "android" {
 		if err := audioStreams[0].Open(); err == nil {
 			bgv.audioStream = audioStreams[0]
 			// Build an independent chain mixed into sys.soundMixer
@@ -639,6 +640,9 @@ func buildFFFilterGraph(sw, sh, ww, wh int, sm BgVideoScaleMode, sf BgVideoScale
 // updateAudioVolume applies the same dB mapping as BGM so video audio
 // behaves like music but on a separate mixer path.
 func (bgv *bgVideo) updateAudioVolume() {
+	if runtime.GOOS == "android" {
+		return
+	}
 	if bgv.videoVol == nil {
 		return
 	}
