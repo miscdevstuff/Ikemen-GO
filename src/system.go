@@ -3399,7 +3399,7 @@ type SelectChar struct {
 	anims         PreloadedAnims
 	sff           *Sff
 	music         Music
-	//scp            *SelectCharParams
+	scp           *SelectCharParams
 }
 
 func newSelectChar() *SelectChar {
@@ -3409,7 +3409,7 @@ func newSelectChar() *SelectChar {
 		cns_scale:     [2]float32{1, 1},
 		anims:         NewPreloadedAnims(),
 		music:         make(Music),
-		//scp:           newSelectCharParams(),
+		scp:           newSelectCharParams(),
 	}
 }
 
@@ -3422,7 +3422,7 @@ type SelectStage struct {
 	anims           PreloadedAnims
 	sff             *Sff
 	music           Music
-	//ssp             *SelectStageParams
+	ssp             *SelectStageParams
 }
 
 func newSelectStage() *SelectStage {
@@ -3431,25 +3431,8 @@ func newSelectStage() *SelectStage {
 		portraitscale: 1,
 		anims:         NewPreloadedAnims(),
 		music:         make(Music),
-		//ssp:           newSelectStageParams(),
+		ssp:           newSelectStageParams(),
 	}
-}
-
-type OverrideCharData struct {
-	life        int32
-	lifeMax     int32
-	power       int32
-	dizzyPoints int32
-	guardPoints int32
-	ratioLevel  int32
-	lifeRatio   float32
-	attackRatio float32
-	existed     bool
-}
-
-func newOverrideCharData() *OverrideCharData {
-	return &OverrideCharData{life: -1, lifeMax: -1, power: -1, dizzyPoints: -1,
-		guardPoints: -1, ratioLevel: 0, lifeRatio: 1, attackRatio: 1}
 }
 
 type Select struct {
@@ -3463,8 +3446,8 @@ type Select struct {
 	stageSpritePreload map[[2]uint16]bool
 	cdefOverwrite      map[int]string
 	sdefOverwrite      string
-	ocd                [3][]OverrideCharData
 	music              Music
+	launchFightParams  *LaunchFightParams
 }
 
 func newSelect() *Select {
@@ -3477,6 +3460,7 @@ func newSelect() *Select {
 		stageSpritePreload: make(map[[2]uint16]bool),
 		cdefOverwrite:      make(map[int]string),
 		music:              make(Music),
+		launchFightParams:  newLaunchFightParams(),
 	}
 }
 
@@ -4120,7 +4104,11 @@ func (s *Select) AddSelectedChar(tn, cn, pl int) bool {
 	}
 	sys.loadMutex.Lock()
 	s.selected[tn] = append(s.selected[tn], [...]int{n, pl})
-	s.ocd[tn] = append(s.ocd[tn], *newOverrideCharData())
+	if s.launchFightParams == nil {
+		s.launchFightParams = newLaunchFightParams()
+	}
+	// ensure per-member override slot exists (needed for existed flag / persistence)
+	_ = s.launchFightParams.ensureOverride(tn, len(s.selected[tn])-1)
 	sys.loadMutex.Unlock()
 	return true
 }
@@ -4128,10 +4116,10 @@ func (s *Select) AddSelectedChar(tn, cn, pl int) bool {
 func (s *Select) ClearSelected() {
 	sys.loadMutex.Lock()
 	s.selected = [2][][2]int{}
-	s.ocd = [3][]OverrideCharData{}
 	sys.loadMutex.Unlock()
 	s.selectedStageNo = -1
 	s.music = make(Music)
+	s.launchFightParams = newLaunchFightParams()
 }
 
 type LoaderState int32

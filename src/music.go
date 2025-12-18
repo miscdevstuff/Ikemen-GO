@@ -56,6 +56,9 @@
 //   "<prefix>.music=" starts a new candidate for that prefix; subsequent
 //   "<prefix>.bgm*" fields update the most recently created candidate.
 //
+// NOTE: select_params.go additionally supports "music=path vol loopstart loopend"
+// by expanding it into the above "<prefix>.bgm*" keys before calling AppendParams.
+//
 // Normalization of naming
 // -----------------------
 // Elecbyte used inconsistent keys across files. Both the INI loader
@@ -427,7 +430,7 @@ func (m Music) act() {
 			// Victory (decisive round, winning & alive)
 			if sys.stage.bgmState < BGMStateVictory &&
 				c.win() && c.alive() &&
-				sys.decisiveRound[c.teamside] {
+				sys.decisiveRound[^c.playerNo&1] {
 
 				//fmt.Printf("[music] act: decisive victory for teamside=%d, trying 'victory' prefix\n", c.teamside)
 
