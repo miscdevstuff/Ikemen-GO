@@ -935,14 +935,14 @@ func readSound(f io.ReadSeekCloser, size uint32) (*Sound, error) {
 	if runtime.GOOS == "android" {
 		// Create SDL RWops from the byte slice we just read
 		// unsafe.Pointer points to the start of the slice data
-		rw, err := sdl.RWFromMem(unsafe.Pointer(&wavData[0]), len(wavData))
+		rw, err := sdl.RWFromMem(wavData)
 		if err != nil {
 			fmt.Printf("Android: Failed to create RWops for sound: %v\n", err)
 		} else {
 			// LoadWAV_RW decodes the bytes (WAV/OGG/MP3) into a raw PCM chunk for the mixer
 			// 'true' means "Auto-Free the RWops", but NOT the data source (wavData)
 			// Since wavData is in the struct, it stays alive. Perfect.
-			if c, err := mix.LoadWAV_RW(rw, true); err == nil {
+			if c, err := mix.LoadWAVRW(rw, true); err == nil {
 				soundObj.chunk = c
 			} else {
 				fmt.Printf("Android: SDL_mixer failed to load sound: %v\n", err)
@@ -1176,7 +1176,7 @@ func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul flo
 
 			// 2. Play on specific channel (-1 = first free)
 			// We play it first to get the channel ID back
-			channel := sound.chunk.Play(-1, sdlLoop)
+			channel, _ := sound.chunk.Play(-1, sdlLoop)
 
 			// 3. Apply Effects (If channel was allocated)
 			if channel != -1 {
