@@ -1221,7 +1221,11 @@ func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul flo
 }
 
 func (s *SoundChannel) IsPlaying() bool {
-	return s.sound != nil
+	if runtime.GOOS == "android" {
+		// On Android, if s.sound is set, we assume it's active
+		return s.sound != nil
+	}
+	return s.sound != nil && s.ctrl != nil && !s.ctrl.Paused
 }
 
 func (s *SoundChannel) SetPaused(pause bool) {
@@ -1234,6 +1238,13 @@ func (s *SoundChannel) SetPaused(pause bool) {
 }
 
 func (s *SoundChannel) Stop() {
+	if runtime.GOOS == "android" {
+		// Android: Just clear the reference. SDL_mixer manages the actual channel lifetime.
+		// If we really need to halt, we'd need to track the channel ID returned by Play.
+		s.sound = nil
+		return
+	}
+	// Desktop
 	if s.ctrl != nil {
 		speaker.Lock()
 		s.ctrl.Streamer = nil
@@ -1243,13 +1254,22 @@ func (s *SoundChannel) Stop() {
 }
 
 func (s *SoundChannel) SetVolume(vol float32) {
-	if s.ctrl != nil {
+	if runtime.GOOS == "android" {
+		// Prevent crash on Android by ignoring volume changes for now
+		// (To implement this, you'd need to store the SDL channel ID)
+		return
+	}
+	if s.ctrl != nil && s.sfx != nil {
 		s.sfx.volume = ClampF(vol, 0, 512)
 	}
 }
 
 func (s *SoundChannel) SetPan(p, ls float32, x *float32) {
-	if s.ctrl != nil {
+	if runtime.GOOS == "android" {
+		// Prevent crash on Android
+		return
+	}
+	if s.ctrl != nil && s.sfx != nil {
 		s.sfx.ls = ls
 		s.sfx.x = x
 		s.sfx.p = p * ls
@@ -1257,20 +1277,27 @@ func (s *SoundChannel) SetPan(p, ls float32, x *float32) {
 }
 
 func (s *SoundChannel) SetPriority(priority int32) {
-	if s.ctrl != nil {
+	if runtime.GOOS == "android" {
+		return
+	}
+	if s.ctrl != nil && s.sfx != nil {
 		s.sfx.priority = priority
 	}
 }
 
 func (s *SoundChannel) SetChannel(channel int32) {
-	if s.ctrl != nil {
+	if runtime.GOOS == "android" {
+		return
+	}
+	if s.ctrl != nil && s.sfx != nil {
 		s.sfx.channel = channel
 	}
 }
 
 func (s *SoundChannel) SetFreqMul(freqmul float32) {
 	if s.ctrl != nil {
-		if s.sound != nil {
+		// FIX: Check s.sfx != nil for Android safety
+		if s.sound != nil && s.sfx != nil {
 			// Special case: freqmul == 0 pauses
 			if freqmul == 0 {
 				s.sfx.freqmul = freqmul
@@ -1290,6 +1317,10 @@ func (s *SoundChannel) SetFreqMul(freqmul float32) {
 }
 
 func (s *SoundChannel) SetLoopPoints(loopstart, loopend int) {
+	// FIX: Check s.sfx != nil before accessing it
+	if s.sfx == nil {
+		return
+	}
 	// Set both at once, why not
 	if sl, ok := s.sfx.streamer.(*StreamLooper); ok {
 		if sl.loopstart != loopstart && sl.loopend != loopend {
@@ -1348,7 +1379,10 @@ func (s *SoundChannels) count() int32 {
 func (s *SoundChannels) New(ch int32, lowpriority bool, priority int32) *SoundChannel {
 	if ch >= 0 && ch < sys.cfg.Sound.WavChannels {
 		for i := s.count() - 1; i >= 0; i-- {
-			if s.channels[i].IsPlaying() && s.channels[i].sfx.channel == ch {
+			// FIX: Check s.channels[i].sfx != nil.
+			// On Android, sfx is nil, so we cannot check channel/priority.
+			// This check prevents the Nil Pointer Dereference crash.
+			if s.channels[i].IsPlaying() && s.channels[i].sfx != nil && s.channels[i].sfx.channel == ch {
 				if (lowpriority && priority <= s.channels[i].sfx.priority) || priority < s.channels[i].sfx.priority {
 					return nil
 				}
@@ -1433,6 +1467,13 @@ func (s *SoundChannels) StopAll() {
 func (s *SoundChannels) Tick() {
 	for i := range s.channels {
 		v := &s.channels[i]
+
+		// FIX: Skip Beep stream logic on Android to avoid Nil Pointer Dereference.
+		// SDL_mixer handles audio on its own thread, so we don't need to tick streams here.
+		if runtime.GOOS == "android" {
+			continue
+		}
+
 		if v.IsPlaying() {
 			if v.streamer.Position() >= v.sound.length && v.sfx.loop != -1 { // End the sound
 				v.sound = nil
