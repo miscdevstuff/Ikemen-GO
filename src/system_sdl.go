@@ -28,6 +28,11 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	var err error
 	var window *sdl.Window
 
+    // FIX: Set hint BEFORE sdl.Init to prevent black screen on resume on Android
+	if runtime.GOOS == "android" {
+		sdl.SetHint(sdl.HINT_ANDROID_BLOCK_ON_PAUSE, "1")
+	}
+
 	// Initialize SDL
 	chk(sdl.Init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK | sdl.INIT_EVENTS | sdl.INIT_GAMECONTROLLER | sdl.INIT_HAPTIC | sdl.INIT_TIMER))
 
