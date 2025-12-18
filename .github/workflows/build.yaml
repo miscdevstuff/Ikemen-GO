@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install build-essential pkg-config autoconf automake libtool libtool-bin nasm yasm git make golang libasound2-dev jq
+          sudo apt install build-essential pkg-config autoconf automake libtool libtool-bin nasm yasm git make golang libasound2-dev
 
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
@@ -64,15 +64,22 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK to file.io
+      - name: Zip APK
         if: success() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
         run: |
           zip app-debug.zip app_android/android/app/build/outputs/apk/debug/app-debug.apk
           ls -lh app-debug.zip
-          UPLOAD_URL=$(curl -F "file=@app-debug.zip" https://file.io\?expires=1 | jq -r '.link')
-          echo "Download link: $UPLOAD_URL (expires in 1 day)"
-        # env:
-          # Outputs the link in logs for easy copy-paste
+
+      - name: Upload Zipped APK to Telegram (Large File Support)
+        if: success() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_STRING_SESSION: ${{ secrets.TELEGRAM_STRING_SESSION }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          pip3 install telethon
+          python3 build_scripts/telegram_stuff/upload_to_telegram.py --file app-debug.zip
 
 #       - name: Upload APK
 #         uses: actions/upload-artifact@v4
