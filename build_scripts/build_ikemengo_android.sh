@@ -1,6 +1,6 @@
 #!/bin/bash
 # Android build script for Ikemen GO core (shared lib for JNI)
-# - Cross-builds FFmpeg, libxmp, SDL2 with NDK
+# - Cross-builds FFmpeg (configure), libxmp (cmake), SDL2 (cmake), SDL2_mixer (cmake) with NDK
 # - Links them + gl4es into libikemen.so
 # - Outputs to app_android/android/app/src/main/jniLibs/<ABI>
 
@@ -73,10 +73,8 @@ ensure_host_deps() {
 	need tar
 	need git
 	need pkg-config
-	need autoconf
-	need automake
-	need libtool
 	need make
+	need cmake
 	need nasm
 	need yasm
 	need go
@@ -117,6 +115,9 @@ setup_ndk() {
 	export ANDROID_NDK_HOME
 	export ANDROID_TOOLCHAIN
 	export ANDROID_SYSROOT="$ANDROID_TOOLCHAIN/sysroot"
+
+	# CMake Toolchain File (Standard NDK location)
+	export CMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
 
 	# Compiler / binutils
 	export CC="$ANDROID_TOOLCHAIN/bin/${ANDROID_TRIPLE}${ANDROID_API}-clang"
@@ -195,7 +196,7 @@ download_and_extract() {
 }
 
 # --------------------------------------------------------------------
-# FFmpeg build (minimal feature set, Android)
+# FFmpeg build (Configure - Standard)
 # --------------------------------------------------------------------
 build_ffmpeg_android() {
 	local srcdir="$REPO_ROOT/build/ffmpeg-src"
@@ -206,43 +207,27 @@ build_ffmpeg_android() {
 
 	pushd "$srcdir" > /dev/null
 
-	local cfg=(
-		"--prefix=$FFMPEG_PREFIX"
-		"--enable-cross-compile"
-		"--target-os=android"
-		"--arch=$ANDROID_ARCH"
-		"--cross-prefix=${ANDROID_TRIPLE}-"
-		"--cc=$CC"
-		"--cxx=$CXX"
-		"--ar=$AR"
-		"--ranlib=$RANLIB"
-		"--strip=${ANDROID_TRIPLE}-strip"
-		"--sysroot=$ANDROID_SYSROOT"
+	# NOTE: We use "$STRIP" (llvm-strip) instead of relying on toolchain path detection
+	./configure \
+		--prefix="$FFMPEG_PREFIX" \
+		--enable-cross-compile \
+		--target-os=android \
+		--arch=$ANDROID_ARCH \
+		--cross-prefix=${ANDROID_TRIPLE}- \
+		--cc=$CC --cxx=$CXX --ar=$AR --ranlib=$RANLIB \
+		--strip="$STRIP" \
+		--sysroot=$ANDROID_SYSROOT \
+		--enable-shared --disable-static \
+		--disable-programs --disable-doc --disable-debug \
+		--disable-everything --disable-autodetect \
+		--enable-avformat --enable-avcodec --enable-avutil \
+		--enable-swresample --enable-swscale --enable-avfilter \
+		--enable-protocol=file \
+		--enable-demuxer=matroska,webm \
+		--enable-decoder=vp8,vp9,opus,vorbis \
+		--extra-cflags="-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include" \
+		--extra-ldflags="-L$ANDROID_SYSROOT/usr/lib/$ANDROID_TRIPLE/$ANDROID_API"
 
-		"--enable-shared" "--disable-static"
-		"--disable-programs"
-		"--disable-doc"
-		"--disable-debug"
-		"--disable-everything"
-		"--disable-autodetect"
-
-		"--enable-avformat"
-		"--enable-avcodec"
-		"--enable-avutil"
-		"--enable-swresample"
-		"--enable-swscale"
-		"--enable-avfilter"
-
-		"--enable-protocol=file"
-		"--enable-demuxer=matroska,webm"
-		"--enable-decoder=vp8,vp9,opus,vorbis"
-		"--enable-parser=vp8,vp9,opus,vorbis"
-
-		"--extra-cflags=-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include"
-		"--extra-ldflags=-L$ANDROID_SYSROOT/usr/lib/$ANDROID_TRIPLE/$ANDROID_API"
-	)
-
-	./configure "${cfg[@]}"
 	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
 	make install
 
@@ -252,118 +237,108 @@ build_ffmpeg_android() {
 }
 
 # --------------------------------------------------------------------
-# libxmp build (module music)
+# libxmp build (CMake - Migrated)
 # --------------------------------------------------------------------
 build_libxmp_android() {
 	local srcdir="$REPO_ROOT/build/libxmp-src"
 
-	echo "==> Building libxmp for Android (prefix=$LIBXMP_PREFIX)"
+	echo "==> Building libxmp for Android (CMake)"
 	rm -rf "$srcdir"
 	mkdir -p "$(dirname "$srcdir")"
 	git clone --depth 1 --single-branch https://github.com/cmatsuoka/libxmp.git "$srcdir"
-	pushd "$srcdir" > /dev/null
 
-	autoreconf -fi || true
+	# Important: CMAKE_POSITION_INDEPENDENT_CODE=ON is required for linking static libs into shared libs
+	cmake -S "$srcdir" -B "$srcdir/build_android" \
+		-DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE" \
+		-DANDROID_ABI="$ANDROID_ABI" \
+		-DANDROID_PLATFORM="$ANDROID_API" \
+		-DCMAKE_INSTALL_PREFIX="$LIBXMP_PREFIX" \
+		-DBUILD_SHARED=OFF \
+		-DBUILD_STATIC=ON \
+		-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+		-G "Unix Makefiles"
 
-	./configure \
-		--host="$ANDROID_TRIPLE" \
-		--prefix="$LIBXMP_PREFIX" \
-		--enable-static \
-		--disable-shared \
-		CC="$CC" \
-		AR="$AR" \
-		RANLIB="$RANLIB" \
-		CFLAGS="-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include"
-
-	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
-	make install
+	cmake --build "$srcdir/build_android" --target install -- -j4
 
 	echo "==> libxmp installed to: $LIBXMP_PREFIX"
 	ls -R "$LIBXMP_PREFIX" || true
-	popd > /dev/null
 }
 
 # --------------------------------------------------------------------
-# SDL2 build (for go-sdl2 on Android)
+# SDL2 build (CMake - Migrated)
 # --------------------------------------------------------------------
 build_sdl2_android() {
 	local srcdir="$REPO_ROOT/build/sdl2-src"
 	local url="https://github.com/libsdl-org/SDL/releases/download/release-2.32.8/SDL2-2.32.8.tar.gz"
 
-	echo "==> Building SDL2 for Android (prefix=$SDL2_PREFIX)"
+	echo "==> Building SDL2 for Android (CMake)"
 	download_and_extract "$url" "$srcdir"
-	pushd "$srcdir" > /dev/null
 
-	# If confiure doesnt exist but autogen.sh exists, run it to generate configure
-	if [[ ! -f "./configure" && -f "./autogen.sh" ]]; then
-		./autogen.sh
-	fi
+	# -DSDL_OPENSLES=OFF : Disables compilation of SDL_openslES.c
+	# -DSDL_AAUDIO=ON    : Enables the AAudio driver
+	cmake -S "$srcdir" -B "$srcdir/build_android" \
+		-DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE" \
+		-DANDROID_ABI="$ANDROID_ABI" \
+		-DANDROID_PLATFORM="$ANDROID_API" \
+		-DCMAKE_INSTALL_PREFIX="$SDL2_PREFIX" \
+		-DSDL_SHARED=ON \
+		-DSDL_STATIC=OFF \
+		-DSDL_OPENSLES=OFF \
+		-DSDL_AAUDIO=ON \
+		-DSDL_HIDAPI=OFF \
+		-DSDL_TEST=OFF \
+		-G "Unix Makefiles"
 
-	if [[ ! -f "./configure" ]]; then
-		echo "ERROR: SDL2 configure script not found even after autogen. Check SDL version/tag." >&2
-		exit 1
-	fi
+	cmake --build "$srcdir/build_android" --target install -- -j4
 
-	LDFLAGS="-L$ANDROID_SYSROOT/usr/lib/$ANDROID_TRIPLE/$ANDROID_API -landroid -llog" \
-		LIBS="-llog -landroid" \
-		./configure \
-		--host="$ANDROID_TRIPLE" \
-		--prefix="$SDL2_PREFIX" \
-		--enable-shared \
-		--disable-static \
-		--enable-audio \
-		--enable-audio-opensles \
-		--enable-audio-aaudio \
-		--enable-video-opengl \
-		--disable-hidapi \
-		CC="$CC" \
-		AR="$AR" \
-		RANLIB="$RANLIB" \
-		CFLAGS="-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include"
-
-	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
-	make install
-
-	# if libSDL2.so doesnt exist copy libSDL2-2.0.so as libSDL2.so to satisfy linker
+	# Legacy compat: copy libSDL2-2.0.so to libSDL2.so if needed
 	if [[ -f "$SDL2_PREFIX/lib/libSDL2-2.0.so" && ! -f "$SDL2_PREFIX/lib/libSDL2.so" ]]; then
 		cp -L "$SDL2_PREFIX/lib/libSDL2-2.0.so" "$SDL2_PREFIX/lib/libSDL2.so"
 	fi
 
 	echo "==> SDL2 installed to: $SDL2_PREFIX"
 	ls -R "$SDL2_PREFIX" || true
-
-	popd > /dev/null
 }
 
 # --------------------------------------------------------------------
-# SDL2_mixer build (Hardware mixing for Android)
+# SDL2_mixer build (CMake - Migrated)
 # --------------------------------------------------------------------
 build_sdl2_mixer_android() {
 	local srcdir="$REPO_ROOT/build/sdl2-mixer-src"
-	# Use 2.8.0 for built-in dr_mp3/stb_vorbis support
 	local url="https://github.com/libsdl-org/SDL_mixer/releases/download/release-2.8.0/SDL2_mixer-2.8.0.tar.gz"
 
-	echo "==> Building SDL2_mixer for Android"
+	echo "==> Building SDL2_mixer for Android (CMake)"
 	download_and_extract "$url" "$srcdir"
-	pushd "$srcdir" > /dev/null
 
-	export CFLAGS="-fPIC -DANDROID -I$ANDROID_SYSROOT/usr/include -I$SDL2_PREFIX/include/SDL2"
-	export LDFLAGS="-L$SDL2_PREFIX/lib -L$LIBXMP_PREFIX/lib"
+	# Ensure CMake can find libxmp via pkg-config
+	export PKG_CONFIG_PATH="$LIBXMP_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
-	./configure \
-		--host="$ANDROID_TRIPLE" \
-		--prefix="$SDL2_PREFIX" \
-		--enable-shared --disable-static \
-		--disable-music-midi-native --disable-music-midi-fluidsynth \
-		--enable-music-mod-xmp --disable-music-mod-modplug --with-xmp-prefix="$LIBXMP_PREFIX" \
-		--enable-music-ogg-stb --enable-music-mp3-drmp3 --enable-music-flac-drflac \
-		--disable-music-opus --disable-music-wave \
-		--with-sdl-prefix="$SDL2_PREFIX" \
-		CC="$CC" AR="$AR" RANLIB="$RANLIB"
+	# FIX: Add CMAKE_FIND_ROOT_PATH so find_package(libxmp) works in cross-compile
+	# CMake defaults to searching only inside the NDK sysroot when cross-compiling.
+	# We must explicitly add our build prefix to the search path.
+	cmake -S "$srcdir" -B "$srcdir/build_android" \
+		-DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE" \
+		-DANDROID_ABI="$ANDROID_ABI" \
+		-DANDROID_PLATFORM="$ANDROID_API" \
+		-DCMAKE_INSTALL_PREFIX="$SDL2_PREFIX" \
+		-DCMAKE_FIND_ROOT_PATH="$LIBXMP_PREFIX" \
+		-DSDL2MIXER_VENDORED=OFF \
+		-DSDL2MIXER_OPUS=OFF \
+		-DSDL2MIXER_WAVE=OFF \
+		-DSDL2MIXER_WAVPACK=OFF \
+		-DSDL2MIXER_FLAC_DRFLAC=ON \
+		-DSDL2MIXER_MP3_DRMP3=ON \
+		-DSDL2MIXER_MOD_XMP=ON \
+		-DSDL2MIXER_MOD_XMP_SHARED=OFF \
+		-DSDL2MIXER_MIDI=OFF \
+		-DSDL2MIXER_MIDI_FLUIDSYNTH=OFF \
+		-DSDL2MIXER_MIDI_TIMIDITY=OFF \
+		-Dlibxmp_LIBRARY="$LIBXMP_PREFIX/lib/libxmp.a" \
+		-Dlibxmp_INCLUDE_PATH="$LIBXMP_PREFIX/include" \
+		-DSDL2_DIR="$SDL2_PREFIX/lib/cmake/SDL2" \
+		-G "Unix Makefiles"
 
-	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
-	make install
-	popd > /dev/null
+	cmake --build "$srcdir/build_android" --target install -- -j4
 }
 
 # --------------------------------------------------------------------
@@ -471,13 +446,14 @@ build_ikemen_android() {
 	build_sdl2_mixer_android
 
 	# 2) Make Android-built libs visible to pkg-config
-	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:$GL4ES_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+	export PKG_CONFIG_PATH="$FFMPEG_PREFIX/lib/pkgconfig:$SDL2_PREFIX/lib/pkgconfig:$GL4ES_PREFIX/lib/pkgconfig:$LIBXMP_PREFIX/lib/pkgconfig"
 	local pc="${PKG_CONFIG:-pkg-config}"
 
 	# Flags for FFmpeg + libxmp + SDL2 (same idea as build/build.sh)
 	local deps_cflags
 	local deps_libs
-	deps_cflags="$($pc --cflags libavformat libavcodec libavutil libswscale libswresample libavfilter sdl2 gl)"
+	# Fixed: Removed 'gl' (doesn't exist on Android) and added SDL2_mixer
+	deps_cflags="$($pc --cflags libavformat libavcodec libavutil libswscale libswresample libavfilter SDL2_mixer sdl2)"
 	deps_libs="$($pc --libs libavformat libavcodec libavutil libswscale libswresample libavfilter SDL2_mixer sdl2)"
 
 	# 3) Go / CGO setup
@@ -493,15 +469,16 @@ build_ikemen_android() {
 	# C++ flags
 	export CGO_CXXFLAGS="-DANDROID -fPIC -DOBOE_ENABLE_AAUDIO=1"
 
-	# Linker flags: shared deps + Android libs + static libxmp gl4es
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog -lm -ldl -lEGL -lGLESv2 -laaudio -lOpenSLES"
+	# Linker flags: NO -lOpenSLES
+	# We rely on SDL2 being built with -DSDL_OPENSLES=OFF via CMake.
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog -lm -ldl -lEGL -lGLESv2 -laaudio"
 
 	# 4) Build as c-shared for JNI, add `-s -w` in ldflags to strip debug symbols
 	local out_so="$JNI_DIR/libikemen.so"
 	go build -tags android \
 		-buildmode=c-shared \
 		-trimpath \
-		-ldflags="-X 'main.Version=${APP_VERSION}' -X 'main.BuildTime=${APP_BUILDTIME}'" \
+		-ldflags="-X 'main.Version=${APP_VERSION}' -X 'main.BuildTime=${APP_BUILDTIME}' -s -w" \
 		-o "$out_so" \
 		./src
 
