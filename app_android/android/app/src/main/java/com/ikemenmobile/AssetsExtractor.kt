@@ -13,10 +13,22 @@ object AssetsExtractor {
     private const val VERSION = "1"
     private const val VERSION_FILE = ".ikemen_assets_version"
 
-    fun ensureAssetsExtracted(context: Context) {
-        // Matches the logic in MainActivity
-        val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
-        val versionFile = File(baseDir, VERSION_FILE)
+    // Copies the raw assets.zip to a destination file
+    fun copyAssetsZip(context: Context, destFile: File) {
+        try {
+            context.assets.open(ASSETS_ZIP_NAME).use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            Log.d(TAG, "Copied assets.zip backup to ${destFile.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to copy assets.zip backup", e)
+        }
+    }
+
+    fun ensureAssetsExtracted(context: Context, destDir: File) {
+        val versionFile = File(destDir, VERSION_FILE)
 
         try {
             if (versionFile.exists()) {
@@ -35,16 +47,17 @@ object AssetsExtractor {
         }
 
         try {
-            extractZipFromAssets(context, ASSETS_ZIP_NAME, baseDir)
+            extractZipFromAssets(context, ASSETS_ZIP_NAME, destDir)
             versionFile.writeText(VERSION)
-            Log.d(TAG, "Assets extracted successfully to ${baseDir.absolutePath}")
+            Log.d(TAG, "Assets extracted successfully to ${destDir.absolutePath}")
         } catch (e: Exception) {
             Log.e(TAG, "FAILED to extract assets", e)
         }
     }
 
     private fun extractZipFromAssets(context: Context, assetName: String, destDir: File) {
-        destDir.mkdirs()
+        if (!destDir.exists()) destDir.mkdirs()
+        
         try {
             context.assets.open(assetName).use { input ->
                 ZipInputStream(input).use { zis ->

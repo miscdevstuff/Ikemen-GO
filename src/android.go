@@ -16,39 +16,38 @@ import "C"
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"unsafe"
 )
 
 //export SDL_main
 func SDL_main(argc C.int, argv **C.char) C.int {
-	argcGo := int(argc)
-	argvSlice := unsafe.Slice(argv, argcGo)
-
-	// 1. Get Base Path
-	var base string
-	base = os.Getenv("IKEMEN_PATH")
+	// 1. Get Base Path from Env (Set by MainActivity)
+	base := os.Getenv("IKEMEN_PATH")
 	
-	if base == "" && argcGo > 1 && argvSlice[1] != nil {
-		base = C.GoString(argvSlice[1])
-	}
-
 	if base == "" {
-		base = "/storage/emulated/0/Android/data/com.ikemenmobile/files"
+		// Fallback hardcoded just in case
+		base = "/storage/emulated/0/IkemenMobile"
 	}
 
-	// 2. Setup TMPDIR
-	tmpDir := filepath.Join(base, "tmp")
-	os.MkdirAll(tmpDir, 0755)
-	os.Setenv("TMPDIR", tmpDir)
-
-	// 3. Logging
-	msg := C.CString(fmt.Sprintf("SDL_main(): Launching. Base: %s", base))
+	// 2. Logging
+	msg := C.CString(fmt.Sprintf("SDL_main(): Starting. CWD: %s", base))
 	C.ikm_log(msg)
 	C.free(unsafe.Pointer(msg))
 
-	// 4. Start Engine
-	// This function will likely never return because RunGame calls os.Exit(0)
+	// 3. Switch Working Directory
+	// This ensures all file operations happen inside IkemenMobile/
+	if err := os.Chdir(base); err != nil {
+         msgErr := C.CString(fmt.Sprintf("SDL_main(): Failed to Chdir: %v", err))
+         C.ikm_log(msgErr)
+         C.free(unsafe.Pointer(msgErr))
+    }
+    
+    // 4. Ensure TMPDIR exists on Go side (Safety)
+    if tmp := os.Getenv("TMPDIR"); tmp != "" {
+        os.MkdirAll(tmp, 0755)
+    }
+
+	// 5. Start Engine
 	RunGameAndroid(base)
 
 	return 0

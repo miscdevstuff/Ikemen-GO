@@ -1,68 +1,119 @@
 package com.ikemenmobile
 
-import android.content.pm.ActivityInfo
-import android.content.res.Configuration
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.system.Os
 import android.util.Log
-import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
-import android.view.ContextThemeWrapper
-import android.widget.FrameLayout
-import android.widget.PopupMenu
-import androidx.appcompat.widget.AppCompatButton
+import android.widget.Toast
 import org.libsdl.app.SDLActivity
 import java.io.File
+
+// UI Imports
+import android.view.ContextThemeWrapper
+import android.view.Gravity
+import android.view.View
+import android.widget.FrameLayout // <--- ADDED THIS IMPORT
+import android.widget.PopupMenu
+import androidx.appcompat.widget.AppCompatButton
 
 class MainActivity : SDLActivity() {
 
     private lateinit var virtualPad: VirtualGamepadLayout
+    private val TAG = "IkemenMainActivity"
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // ---------------------------------------------------------
-        // CRITICAL FIX: Environment Setup BEFORE Native Init
-        // ---------------------------------------------------------
-        try {
-            // 1. Define Paths
-            val filesDirObj = getExternalFilesDir(null) ?: filesDir
-            // Use 'tmp' directory INSIDE the game files directory
-            val tmpDirObj = File(filesDirObj, "tmp")
+        super.onCreate(savedInstanceState) // SDL init
 
-            // 2. Ensure Directories Exist
-            if (!tmpDirObj.exists()) {
-                tmpDirObj.mkdirs()
+        // 1. Check Permissions
+        if (!hasStoragePermission()) {
+            requestStoragePermission()
+            Toast.makeText(this, "Please grant Storage Access to run the game.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // 2. Setup Base Path
+        setupEnvironment()
+    }
+
+    private fun hasStoragePermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return Environment.isExternalStorageManager()
+        }
+        return true
+    }
+
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                intent.data = Uri.parse("package:$packageName")
+                startActivity(intent)
+            } catch (e: Exception) {
+                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                startActivity(intent)
+            }
+        }
+    }
+
+    private fun setupEnvironment() {
+        try {
+            // Define Base Path: /storage/emulated/0/IkemenMobile
+            val rootDir = File(Environment.getExternalStorageDirectory(), "IkemenMobile")
+            if (!rootDir.exists()) {
+                rootDir.mkdirs()
             }
 
-            // 3. Set Environment Variables for Go
-            // IKEMEN_PATH: Game root
-            Os.setenv("IKEMEN_PATH", filesDirObj.absolutePath, true)
-            
-            // TMPDIR: Point to basepath/tmp so all temp files go there
-            Os.setenv("TMPDIR", tmpDirObj.absolutePath, true)
+            // Define Tmp Path
+            val tmpDir = File(rootDir, "tmp")
+            if (!tmpDir.exists()) {
+                tmpDir.mkdirs()
+            }
 
-            // GOGC: PERFORMANCE FIX FOR AUDIO
-            // Default is 100. Setting to 200 or 400 reduces the frequency of 
-            // Garbage Collection pauses, which prevents audio stutter/pops.
+            // --- Extraction Logic ---
+            // 1. Always copy assets.zip for user backup
+            val backupZip = File(rootDir, "assets.zip")
+            if (!backupZip.exists()) {
+                Log.i(TAG, "Copying assets.zip backup...")
+                AssetsExtractor.copyAssetsZip(this, backupZip)
+            }
+
+            // 2. Extract if game missing (Check system.def)
+            val systemDef = File(rootDir, "data/system.def")
+            if (!systemDef.exists()) {
+                Log.i(TAG, "No game found. Extracting initial assets...")
+                AssetsExtractor.ensureAssetsExtracted(this, rootDir)
+            }
+
+            // Export Environment Variables for Go
+            Os.setenv("IKEMEN_PATH", rootDir.absolutePath, true)
+            Os.setenv("TMPDIR", tmpDir.absolutePath, true)
+            
+            // Performance tuning
             Os.setenv("GOGC", "200", true)
 
-            Log.v("Ikemen", "Native Env Init: IKEMEN_PATH=${filesDirObj.absolutePath} TMPDIR=${tmpDirObj.absolutePath} GOGC=200")
+            Log.v(TAG, "Env Init: ROOT=${rootDir.absolutePath} TMP=${tmpDir.absolutePath}")
+
+            // UI Setup
+            setupUI()
+
         } catch (e: Exception) {
-            Log.e("Ikemen", "Failed to set native environment variables", e)
+            Log.e(TAG, "Failed to setup environment", e)
         }
-        // ---------------------------------------------------------
+    }
 
-        super.onCreate(savedInstanceState)
-
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        AssetsExtractor.ensureAssetsExtracted(this)
-
+    private fun setupUI() {
+        requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         val root = window.decorView.findViewById<ViewGroup>(android.R.id.content)
+        
         virtualPad = VirtualGamepadLayout(this)
         root.addView(virtualPad, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         
         setupMenuButton(root)
-        Log.d("MainActivity", "VirtualGamepadLayout attached")
     }
 
     private fun setupMenuButton(root: ViewGroup) {
@@ -93,7 +144,7 @@ class MainActivity : SDLActivity() {
                     true
                 }
                 2 -> {
-                    Log.d("MainActivity", "Import gamepad layout – not implemented yet")
+                    Log.d(TAG, "Import gamepad layout – not implemented yet")
                     true
                 }
                 else -> false
@@ -104,23 +155,17 @@ class MainActivity : SDLActivity() {
 
     override fun onResume() {
         super.onResume()
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        if (hasStoragePermission() && System.getenv("IKEMEN_PATH") == null) {
+             setupEnvironment()
+        }
     }
     
-    override fun getLibraries(): Array<String> {
-        return arrayOf(
-            // "hidapi", // Useful for controller support
-            "ikemen"
-        )
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     }
 
-    override fun getArguments(): Array<String> {
-        val base = getExternalFilesDir(null)?.absolutePath ?: filesDir.absolutePath
-        return arrayOf(base)
+    override fun getLibraries(): Array<String> {
+        return arrayOf("ikemen")
     }
 }
