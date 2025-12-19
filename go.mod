@@ -50,3 +50,5 @@ require (
 )
 
 replace github.com/ebitengine/oto/v3 => ./build/oto-src
+
+replace github.com/Eiton/vulkan => github.com/miscdevstuff/vulkan v0.0.0-20251220093855-831137978e99

@@ -1,5 +1,4 @@
-//go:build !android && !kinc
-// +build !android,!kinc
+//go:build !kinc
 
 package main
 

@@ -400,11 +400,10 @@ func (s *System) init(w, h int32) *lua.LState {
 
 	// Now we proceed to init the render.
 	// Keep vulkan disabled here until vulkan renderer is built
-	/* if s.cfg.Video.RenderMode == "Vulkan 1.3" {
+	if s.cfg.Video.RenderMode == "Vulkan 1.3" {
 		gfx = &Renderer_VK{}
 		gfxFont = &FontRenderer_VK{}
-	} else */
-	if s.cfg.Video.RenderMode == "OpenGL 2.1" {
+	} else if s.cfg.Video.RenderMode == "OpenGL 2.1" {
 		gfx = &Renderer_GL21{}
 		gfxFont = &FontRenderer_GL21{}
 	} else {

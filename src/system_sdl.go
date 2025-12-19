@@ -8,6 +8,7 @@ import (
 	"image/draw"
 	"runtime"
 	"strings"
+	"unsafe"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -55,21 +56,24 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	var windowFlags uint32 = sdl.WINDOW_INPUT_FOCUS
 
     if runtime.GOOS == "android" {
-		// --- ANDROID PATH: Force GLES2 context for gl4es ---
-		// gl4es will emulate desktop GL 2.1 on top of GLES2.
+        if sys.cfg.Video.RenderMode == "Vulkan 1.3" {
+            windowFlags |= sdl.WINDOW_VULKAN
+        } else {
+    		// --- ANDROID PATH: Force GLES2 context for gl4es ---
+    		// gl4es will emulate desktop GL 2.1 on top of GLES2.
 
-		// Ask SDL for an ES context
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_ES)
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 2)
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 0)
+    		// Ask SDL for an ES context
+    		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_ES)
+    		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 2)
+    		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 0)
 
-		// No forward-compatible / core flags on ES
-		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_FLAGS, 0)
+    		// No forward-compatible / core flags on ES
+    		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_FLAGS, 0)
 
-		// Always use OpenGL (GLES) window; Vulkan is off on Android for us
-		windowFlags |= sdl.WINDOW_OPENGL
-		// Android is always fullscreen; SDL will manage real size
-		windowFlags |= sdl.WINDOW_FULLSCREEN_DESKTOP
+    		windowFlags |= sdl.WINDOW_OPENGL
+        }
+        // Android is always fullscreen; SDL will manage real size
+    	windowFlags |= sdl.WINDOW_FULLSCREEN_DESKTOP
 	} else {
         if sys.cfg.Video.RenderMode == "OpenGL 3.2" {
     		err = sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_CORE) // only GL 3.2 needs this
@@ -363,6 +367,49 @@ func (w *Window) toggleFullscreen() {
 		sdl.GLSetSwapInterval(sys.cfg.Video.VSync)
 	}
 	w.fullscreen = !w.fullscreen
+}
+
+func (w *Window) VulkanGetInstanceExtensions() []string {
+    if w.Window == nil {
+        return nil
+    }
+
+    exts := w.Window.VulkanGetInstanceExtensions()
+    if len(exts) == 0 {
+        fmt.Println("[Vulkan] SDL_Vulkan_GetInstanceExtensions returned no extensions")
+        return nil
+    }
+
+    return exts
+}
+
+func (w *Window) VulkanCreateSurface(instance interface{}) (unsafe.Pointer, error) {
+    if w.Window == nil {
+        return nil, fmt.Errorf("no SDL window")
+    }
+
+    // SDL needs uintptr VkInstance handle
+    var inst uintptr
+
+    switch v := instance.(type) {
+    case uintptr:
+        inst = v
+    default:
+        // Most Vulkan bindings expose Handle() uintptr
+        type hasHandle interface{ Handle() uintptr }
+        if h, ok := instance.(hasHandle); ok {
+            inst = h.Handle()
+        } else {
+            return nil, fmt.Errorf("unsupported Vulkan instance type %T", instance)
+        }
+    }
+
+    surf, err := w.Window.VulkanCreateSurface(inst)
+    if err != nil {
+        return nil, fmt.Errorf("SDL_Vulkan_CreateSurface failed: %w", err)
+    }
+
+    return unsafe.Pointer(surf), nil
 }
 
 func convertI16toI8(val int16) (converted int8) {

@@ -471,7 +471,7 @@ build_ikemen_android() {
 
 	# Linker flags: NO -lOpenSLES
 	# We rely on SDL2 being built with -DSDL_OPENSLES=OFF via CMake.
-	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog -lm -ldl -lEGL -lGLESv2 -laaudio"
+	export CGO_LDFLAGS="${deps_libs} -L$FFMPEG_PREFIX/lib -L$SDL2_PREFIX/lib -L$GL4ES_PREFIX/lib -L$LIBXMP_PREFIX/lib $LIBXMP_PREFIX/lib/libxmp.a $GL4ES_PREFIX/lib/libGL.a -landroid -llog -lm -ldl -lEGL -lGLESv2 -lvulkan -laaudio"
 
 	# 4) Build as c-shared for JNI, add `-s -w` in ldflags to strip debug symbols
 	local out_so="$JNI_DIR/libikemen.so"
