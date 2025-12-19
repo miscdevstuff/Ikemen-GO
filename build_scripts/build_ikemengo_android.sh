@@ -362,8 +362,8 @@ prepare_ikemen_assets_zip() {
 	echo "==> Preparing ikemen_assets.zip"
 
 	local TEMP_ASSETS_ROOT="$REPO_ROOT/build/ikemen_assets_tmp"
-	local SCREENPACK_DIR="$REPO_ROOT/build/elecbyte_screenpack"
-	local SCREENPACK_REPO="https://github.com/ikemen-engine/Ikemen_GO-Elecbyte-Screenpack.git"
+	#local SCREENPACK_DIR="$REPO_ROOT/build/elecbyte_screenpack"
+	#local SCREENPACK_REPO="https://github.com/ikemen-engine/Ikemen_GO-Elecbyte-Screenpack.git"
 
 	# Clean old temp + assets dir
 	rm -rf "$ASSETS_DIR" "$TEMP_ASSETS_ROOT"
@@ -385,20 +385,20 @@ prepare_ikemen_assets_zip() {
 	fi
 
 	# 2) Shallow-clone Elecbyte screenpack and merge its content
-	if [[ ! -d "$SCREENPACK_DIR/.git" ]]; then
-		echo "  - Cloning Elecbyte screenpack (shallow)"
-		rm -rf "$SCREENPACK_DIR"
-		git clone --depth=1 "$SCREENPACK_REPO" "$SCREENPACK_DIR"
-	else
-		echo "  - Updating existing Elecbyte screenpack clone"
-		(cd "$SCREENPACK_DIR" && git fetch --depth=1 origin && git reset --hard origin/HEAD) || true
-	fi
+	# if [[ ! -d "$SCREENPACK_DIR/.git" ]]; then
+	# 		echo "  - Cloning Elecbyte screenpack (shallow)"
+	# 		rm -rf "$SCREENPACK_DIR"
+	# 		git clone --depth=1 "$SCREENPACK_REPO" "$SCREENPACK_DIR"
+	# 	else
+	# 		echo "  - Updating existing Elecbyte screenpack clone"
+	# 		(cd "$SCREENPACK_DIR" && git fetch --depth=1 origin && git reset --hard origin/HEAD) || true
+	# 	fi
 
 	# 3) Copy screenpack assets on top (they may override some defaults,
 	#    which is fine and matches desktop usage).
 	#    We keep it simple and copy the whole tree.
-	echo "  - Merging Elecbyte screenpack assets"
-	cp -a "$SCREENPACK_DIR/"* "$TEMP_ASSETS_ROOT/"
+	#	echo "  - Merging Elecbyte screenpack assets"
+	#	cp -a "$SCREENPACK_DIR/"* "$TEMP_ASSETS_ROOT/"
 
 	# 4) Build a single zip containing everything at TEMP_ASSETS_ROOT/.
 	local ZIP_PATH="$ASSETS_DIR/assets.zip"
