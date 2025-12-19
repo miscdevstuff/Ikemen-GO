@@ -27,7 +27,6 @@ func SDL_main(argc C.int, argv **C.char) C.int {
 
 	// 1. Get Base Path
 	var base string
-	// Priority: Env Var (from Java) > Argv (from SDL) > Fallback
 	base = os.Getenv("IKEMEN_PATH")
 	
 	if base == "" && argcGo > 1 && argvSlice[1] != nil {
@@ -38,22 +37,18 @@ func SDL_main(argc C.int, argv **C.char) C.int {
 		base = "/storage/emulated/0/Android/data/com.ikemenmobile/files"
 	}
 
-	// 2. Setup TMPDIR to be basepath/tmp
-	// We strictly use the 'tmp' folder inside our game directory to match motif.go logic.
+	// 2. Setup TMPDIR
 	tmpDir := filepath.Join(base, "tmp")
-	
-	// Force creation of the temp directory.
-	err := os.MkdirAll(tmpDir, 0755)
-
-	// Force the entire Go runtime to use this safe directory for any os.TempDir() calls
+	os.MkdirAll(tmpDir, 0755)
 	os.Setenv("TMPDIR", tmpDir)
 
 	// 3. Logging
-	msg := C.CString(fmt.Sprintf("SDL_main(): Launching. Base: %s, TMPDIR: %s, MkdirErr: %v", base, tmpDir, err))
+	msg := C.CString(fmt.Sprintf("SDL_main(): Launching. Base: %s", base))
 	C.ikm_log(msg)
 	C.free(unsafe.Pointer(msg))
 
 	// 4. Start Engine
+	// This function will likely never return because RunGame calls os.Exit(0)
 	RunGameAndroid(base)
 
 	return 0

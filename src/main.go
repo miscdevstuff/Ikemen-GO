@@ -149,6 +149,12 @@ func RunGame() {
 			panic(err)
 		}
 	}
+	// FIX: When the Lua script finishes (User clicked Exit), kill the process.
+    // This prevents the "Zombie Process" black screen on "restart" on android.
+    if runtime.GOOS == "android" {
+        fmt.Println("[Ikemen] RunGame finished. Exiting process.")
+        os.Exit(0)
+    }
 }
 
 // RunGameAndroid is the entrypoint we call from SDL_main on Android.

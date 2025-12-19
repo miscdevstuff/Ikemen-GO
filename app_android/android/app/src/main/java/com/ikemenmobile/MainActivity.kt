@@ -111,9 +111,12 @@ class MainActivity : SDLActivity() {
         super.onConfigurationChanged(newConfig)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     }
-
+    
     override fun getLibraries(): Array<String> {
-        return arrayOf("ikemen")
+        return arrayOf(
+            // "hidapi", // Useful for controller support
+            "ikemen"
+        )
     }
 
     override fun getArguments(): Array<String> {
