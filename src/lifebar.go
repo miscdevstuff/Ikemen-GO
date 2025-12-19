@@ -208,12 +208,9 @@ func getFont(f map[int]*Fnt, idx int32) *Fnt {
 func readLbText(pre string, is IniSection, str string, ln int16, f map[int]*Fnt, align int32) *LbText {
 	txt := newLbText(align)
 
-	txt.font[3], txt.font[4], txt.font[5], txt.font[6], txt.font[7] = 255, 255, 255, 255, -1
-	var setCol bool
-	if is.ReadI32(pre+"font", &txt.font[0], &txt.font[1], &txt.font[2],
-		&txt.font[3], &txt.font[4], &txt.font[5], &txt.font[6], &txt.font[7]) {
-		setCol = true
-	}
+	txt.font[3], txt.font[4], txt.font[5], txt.font[6], txt.font[7] = -1, -1, -1, 255, -1
+	is.ReadI32(pre+"font", &txt.font[0], &txt.font[1], &txt.font[2],
+		&txt.font[3], &txt.font[4], &txt.font[5], &txt.font[6], &txt.font[7])
 	if txt.font[0] >= 0 && getFont(f, txt.font[0]) == nil {
 		sys.errLog.Printf("Undefined font %v referenced by lifebar parameter: %v\n", txt.font[0], pre+"font")
 		txt.font[0] = -1
@@ -224,7 +221,7 @@ func readLbText(pre string, is IniSection, str string, ln int16, f map[int]*Fnt,
 		txt.text = str
 	}
 	txt.lay = *ReadLayout(pre, is, ln)
-	if setCol {
+	if txt.font[3] >= 0 && txt.font[4] >= 0 && txt.font[5] >= 0 {
 		txt.SetColor(txt.font[3], txt.font[4], txt.font[5], txt.font[6])
 	}
 	txt.pfxinit = ReadPalFX(pre+"palfx.", is, txt.palfx)
@@ -4248,7 +4245,12 @@ func loadLifebar(def string) (*Lifebar, error) {
 	// Load Common FX first
 	for _, key := range SortedKeys(sys.cfg.Common.Fx) {
 		for _, v := range sys.cfg.Common.Fx[key] {
-			if err := loadFightFx(v, true); err != nil {
+			if err := LoadFile(&v, []string{def, sys.motif.Def, "", "data/"}, func(filename string) error {
+				if err := loadFightFx(filename, true); err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
 				return nil, err
 			}
 		}
@@ -5256,10 +5258,53 @@ func (l *Lifebar) setLifebarScale() {
 	l.portraitScale = localW / float32(viewport43[2]) * calcScale
 }
 
+func readMotifFightFromDef(def string) string {
+	if def == "" {
+		return ""
+	}
+	tmp := def
+	var fight string
+	// Use existing path resolution logic.
+	_ = LoadFile(&tmp, []string{tmp, "", "data/"}, func(filename string) error {
+		if filename == "" {
+			return nil
+		}
+		str, err := LoadText(filename)
+		if err != nil {
+			return err
+		}
+		// Minimal parse: scan sections until [Files], then grab "fight".
+		lines := SplitAndTrim(NormalizeNewlines(str), "\n")
+		i := 0
+		for i < len(lines) {
+			is, name, _ := ReadIniSection(lines, &i)
+			if len(name) == 0 {
+				break
+			}
+			if strings.EqualFold(name, "Files") {
+				if v, ok := is["fight"]; ok {
+					fight = strings.TrimSpace(v)
+				}
+				break
+			}
+		}
+		return nil
+	})
+	return fight
+}
+
 func (l *Lifebar) resolvePath() {
-	v := sys.motif.Files.Fight
+	var v string
 	if x, ok := sys.cmdFlags["-lifebar"]; ok {
 		v = x
+	} else {
+		// Prefer already-parsed value.
+		v = sys.motif.Files.Fight
+		// If motif.Files.Fight is not set yet, resolve motif path and read only the [Files] fight entry from sys.motif.Def.
+		if v == "" {
+			sys.motif.resolvePath()
+			v = readMotifFightFromDef(sys.motif.Def)
+		}
 	}
 	v = filepath.ToSlash(v)
 	if v == "" {
@@ -5270,6 +5315,5 @@ func (l *Lifebar) resolvePath() {
 		l.def = filepath.ToSlash(resolved)
 		return
 	}
-
 	l.def = v
 }
