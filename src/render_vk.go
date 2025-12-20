@@ -1100,6 +1100,18 @@ func (r *Renderer_VK) GetName() string {
 }
 
 func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintptr) error {
+    var err error
+    var surface unsafe.Pointer
+    // Proper zero values for Vulkan structs
+    var zeroInstance vk.Instance
+    var zeroSurface  vk.Surface
+
+    // === ANDROID: Instance + Surface already created in Init() ===
+    if runtime.GOOS == "android" && r.instance != zeroInstance && r.surface != zeroSurface {
+        fmt.Println("[Vulkan] Android: Reusing existing Instance + Surface")
+        vk.InitInstance(r.instance)
+        goto DEVICE_CREATE
+    }
 	// create a Vulkan instance.
 	instanceExtensions := sys.window.Window.VulkanGetInstanceExtensions()
 	for i := range instanceExtensions {
@@ -1138,7 +1150,7 @@ func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintpt
 	r.instance = instance
 	vk.InitInstance(r.instance)
 
-	surface, err := sys.window.VulkanCreateSurface(r.instance)
+	surface, err = sys.window.VulkanCreateSurface(r.instance)
 	if err != nil {
 		vk.DestroyInstance(r.instance, nil)
 		err = fmt.Errorf("vkCreateWindowSurface failed with %s", err)
@@ -1146,6 +1158,8 @@ func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintpt
 	}
 
 	r.surface = vk.SurfaceFromPointer(uintptr(surface))
+
+DEVICE_CREATE:
 
 	if r.gpuDevices, err = r.getPhysicalDevices(r.instance); err != nil {
 		r.gpuDevices = nil
@@ -4680,145 +4694,184 @@ func (r *Renderer_VK) CreatePipelineCache() error {
 // Render initialization.
 // Creates the default shaders, the framebuffer and enables MSAA.
 func (r *Renderer_VK) Init() {
-	r.enableModel = sys.cfg.Video.EnableModel
-	r.enableShadow = sys.cfg.Video.EnableModelShadow
-	r.memoryTypeMap = make(map[vk.MemoryPropertyFlagBits]uint32)
-	r.samplers = map[VulkanSamplerInfo]vk.Sampler{}
-	r.stagingBufferFences = [2]bool{false, false}
-	r.stagingBufferIndex = 0
-	r.stagingBufferOffset = 0
-	r.stagingImageCopyRegions = make(map[vk.Image][]vk.BufferImageCopy)
-	r.VKState.VulkanModelPipelineState.VulkanModelSpecializationConstants1.useShadowMap = r.enableShadow
-	r.setVSync = false
-	vk.SetGetInstanceProcAddr(sdl.VulkanGetVkGetInstanceProcAddr())
-	err := vk.Init()
-	if err != nil {
-		panic(err)
-	}
-	wminfo, _ := sys.window.GetWMInfo()
-	var osWindowHandle uintptr
+    r.enableModel = sys.cfg.Video.EnableModel
+    r.enableShadow = sys.cfg.Video.EnableModelShadow
+    r.memoryTypeMap = make(map[vk.MemoryPropertyFlagBits]uint32)
+    r.samplers = map[VulkanSamplerInfo]vk.Sampler{}
+    r.stagingBufferFences = [2]bool{false, false}
+    r.stagingBufferIndex = 0
+    r.stagingBufferOffset = 0
+    r.stagingImageCopyRegions = make(map[vk.Image][]vk.BufferImageCopy)
+    r.VKState.VulkanModelPipelineState.VulkanModelSpecializationConstants1.useShadowMap = r.enableShadow
+    r.setVSync = false
 
-	switch wminfo.Subsystem {
-	case sdl.SYSWM_COCOA:
-		osWindowHandle = uintptr(wminfo.GetCocoaInfo().Window)
-	case sdl.SYSWM_WINDOWS:
-		osWindowHandle = uintptr(wminfo.GetWindowsInfo().Window)
-	case sdl.SYSWM_X11:
-		x11WinID := wminfo.GetX11Info().Window
-		osWindowHandle = uintptr(x11WinID)
-	}
-	err = r.NewVulkanDevice(appInfo, osWindowHandle)
-	if err != nil {
-		if len(r.gpuDevices) > 0 {
-			r.PrintInfo()
-		}
-		panic(err)
-	}
-	err = r.CreateSwapchain()
-	if err != nil {
-		panic(err)
-	}
-	err = r.CreateMemoryBuffers()
-	if err != nil {
-		panic(err)
-	}
-	r.swapchainRenderPass, err = r.CreateSwapchainRenderPass(r.swapchains[0])
-	if err != nil {
-		panic(err)
-	}
-	msaa := sys.msaa
-	if msaa <= 0 {
-		msaa = 1
-	}
-	r.mainRenderPass, err = r.CreateMainRenderPass(r.swapchains[0], msaa, true)
-	if err != nil {
-		panic(err)
-	}
-	r.postProcessingRenderPass, err = r.CreatePostProcessingRenderPass(r.swapchains[0])
-	if err != nil {
-		panic(err)
-	}
-	r.CreatePipelineCache()
-	r.spriteProgram, err = r.CreateSpriteProgram()
-	if err != nil {
-		panic(err)
-	}
+    // === 1) Load Vulkan loader ===
+    vk.SetGetInstanceProcAddr(sdl.VulkanGetVkGetInstanceProcAddr())
+    if err := vk.Init(); err != nil {
+        panic(err)
+    }
 
-	r.postProcessingProgram, err = r.CreateFullScreenShaderProgram(sys.externalShaders)
-	if err != nil {
-		panic(err)
-	}
+    // === 2) SDL Required Instance Extensions ===
+    exts := sys.window.VulkanGetInstanceExtensions()
+    if len(exts) == 0 {
+        panic("SDL returned no Vulkan extensions")
+    }
+    fmt.Println("[Vulkan] Using SDL Instance Extensions:", exts)
 
-	r.panoramaToCubeMapProgram, err = r.CreatePanoramaToCubeMapProgram()
-	if err != nil {
-		panic(err)
-	}
+    // === 3) Create Vulkan Instance using extensions ===
+    instance, err := vkCreateInstanceWithExts(exts)
+    if err != nil {
+        panic(err)
+    }
 
-	r.cubemapFilteringProgram, err = r.CreateCubemapFilteringProgram()
-	if err != nil {
-		panic(err)
-	}
-	r.lutProgram, err = r.CreateLutProgram()
-	if err != nil {
-		panic(err)
-	}
-	err = r.CreateSpriteSampler()
-	if err != nil {
-		panic(err)
-	}
-	err = r.CreateCommandPool()
-	if err != nil {
-		panic(err)
-	}
-	err = r.CreateCommandBuffer()
-	if err != nil {
-		panic(err)
-	}
-	r.renderTargets[0] = r.CreateRenderTarget(r.swapchainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), 1, false)
-	r.renderTargets[1] = r.CreateRenderTarget(r.swapchainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), 1, false)
-	r.mainRenderTarget = r.CreateRenderTarget(r.mainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), msaa, true)
+    // === 4) Create Surface NOW (Android-safe) ===
+    surfPtr, err := sys.window.VulkanCreateSurface(instance)
+    if err != nil {
+        panic(fmt.Errorf("SDL_Vulkan_CreateSurface failed: %w", err))
+    }
 
-	err = r.CreateSyncObjects()
-	if err != nil {
-		panic(err)
-	}
-	err = r.CreateSwapChainFramebuffer(r.swapchains[0], r.swapchainRenderPass.renderPass)
-	if err != nil {
-		panic(err)
-	}
-	r.CreateDescriptorPool()
-	r.VKState.scissor = vk.Rect2D{
-		Extent: r.swapchains[0].extent,
-		Offset: vk.Offset2D{
-			X: 0, Y: 0,
-		},
-	}
-	r.dummyTexture = r.newTexture(1, 1, 8, false).(*Texture_VK)
-	r.dummyTexture.SetData([]byte{0})
-	r.dummyTexture.sampler = r.spriteSamplers[0]
+    // store for reuse
+    r.instance = instance
+    r.surface = vk.SurfaceFromPointer(uintptr(surfPtr))
 
-	r.dummyCubeTexture = r.newDummyCubeMapTexture().(*Texture_VK)
-	r.dummyCubeTexture.SetCubeMapData([]byte{0})
-	r.dummyCubeTexture.sampler = r.spriteSamplers[0]
+    // === 5) Continue your ORIGINAL init flow ===
+    err = r.NewVulkanDevice(appInfo, 0) // Android doesn't need native window handle
+    if err != nil {
+        if len(r.gpuDevices) > 0 {
+            r.PrintInfo()
+        }
+        panic(err)
+    }
 
-	r.spriteProgram.uniformOffsetMap = map[interface{}]uint32{}
-	r.createPalTexture(2048)
-	r.shadowMapTextures = r.createShadowMapTexture(1024)
-	if r.enableModel {
-		r.modelProgram, err = r.CreateModelProgram()
-		if err != nil {
-			panic(err)
-		}
-		if r.enableShadow {
-			r.shadowMapProgram, err = r.CreateShadowMapProgram()
-			if err != nil {
-				panic(err)
-			}
-		}
-	}
-	r.destroyResourceQueues[0] = make(chan VulkanResource, 65536)
-	r.destroyResourceQueues[1] = make(chan VulkanResource, 65536)
-	r.destroyResourceQueueIndex = 0
+    err = r.CreateSwapchain()
+    if err != nil {
+        panic(err)
+    }
+    err = r.CreateMemoryBuffers()
+    if err != nil {
+        panic(err)
+    }
+    r.swapchainRenderPass, err = r.CreateSwapchainRenderPass(r.swapchains[0])
+    if err != nil {
+        panic(err)
+    }
+    msaa := sys.msaa
+    if msaa <= 0 {
+        msaa = 1
+    }
+    r.mainRenderPass, err = r.CreateMainRenderPass(r.swapchains[0], msaa, true)
+    if err != nil {
+        panic(err)
+    }
+    r.postProcessingRenderPass, err = r.CreatePostProcessingRenderPass(r.swapchains[0])
+    if err != nil {
+        panic(err)
+    }
+    r.CreatePipelineCache()
+    r.spriteProgram, err = r.CreateSpriteProgram()
+    if err != nil {
+        panic(err)
+    }
+
+    r.postProcessingProgram, err = r.CreateFullScreenShaderProgram(sys.externalShaders)
+    if err != nil {
+        panic(err)
+    }
+
+    r.panoramaToCubeMapProgram, err = r.CreatePanoramaToCubeMapProgram()
+    if err != nil {
+        panic(err)
+    }
+
+    r.cubemapFilteringProgram, err = r.CreateCubemapFilteringProgram()
+    if err != nil {
+        panic(err)
+    }
+    r.lutProgram, err = r.CreateLutProgram()
+    if err != nil {
+        panic(err)
+    }
+    err = r.CreateSpriteSampler()
+    if err != nil {
+        panic(err)
+    }
+    err = r.CreateCommandPool()
+    if err != nil {
+        panic(err)
+    }
+    err = r.CreateCommandBuffer()
+    if err != nil {
+        panic(err)
+    }
+    r.renderTargets[0] = r.CreateRenderTarget(r.swapchainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), 1, false)
+    r.renderTargets[1] = r.CreateRenderTarget(r.swapchainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), 1, false)
+    r.mainRenderTarget = r.CreateRenderTarget(r.mainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), msaa, true)
+
+    err = r.CreateSyncObjects()
+    if err != nil {
+        panic(err)
+    }
+    err = r.CreateSwapChainFramebuffer(r.swapchains[0], r.swapchainRenderPass.renderPass)
+    if err != nil {
+        panic(err)
+    }
+    r.CreateDescriptorPool()
+    r.VKState.scissor = vk.Rect2D{
+        Extent: r.swapchains[0].extent,
+        Offset: vk.Offset2D{
+            X: 0, Y: 0,
+        },
+    }
+    r.dummyTexture = r.newTexture(1, 1, 8, false).(*Texture_VK)
+    r.dummyTexture.SetData([]byte{0})
+    r.dummyTexture.sampler = r.spriteSamplers[0]
+
+    r.dummyCubeTexture = r.newDummyCubeMapTexture().(*Texture_VK)
+    r.dummyCubeTexture.SetCubeMapData([]byte{0})
+    r.dummyCubeTexture.sampler = r.spriteSamplers[0]
+
+    r.spriteProgram.uniformOffsetMap = map[interface{}]uint32{}
+    r.createPalTexture(2048)
+    r.shadowMapTextures = r.createShadowMapTexture(1024)
+    if r.enableModel {
+        r.modelProgram, err = r.CreateModelProgram()
+        if err != nil {
+            panic(err)
+        }
+        if r.enableShadow {
+            r.shadowMapProgram, err = r.CreateShadowMapProgram()
+            if err != nil {
+                panic(err)
+            }
+        }
+    }
+    r.destroyResourceQueues[0] = make(chan VulkanResource, 65536)
+    r.destroyResourceQueues[1] = make(chan VulkanResource, 65536)
+    r.destroyResourceQueueIndex = 0
+}
+
+func vkCreateInstanceWithExts(exts []string) (vk.Instance, error) {
+    var zero vk.Instance
+
+    if len(exts) == 0 {
+        return zero, fmt.Errorf("no Vulkan extensions provided")
+    }
+
+    createInfo := vk.InstanceCreateInfo{
+        SType:                    vk.StructureTypeInstanceCreateInfo,
+        PApplicationInfo:         appInfo,
+        EnabledExtensionCount:    uint32(len(exts)),
+        PpEnabledExtensionNames:  exts,
+    }
+
+    var instance vk.Instance
+
+    res := vk.CreateInstance(&createInfo, nil, &instance)
+    if res != vk.Success {
+        return zero, fmt.Errorf("vkCreateInstance failed: %v", res)
+    }
+
+    return instance, nil
 }
 
 func (r *Renderer_VK) Close() {
