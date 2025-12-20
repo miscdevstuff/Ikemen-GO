@@ -127,7 +127,7 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		title = "Ikemen GO"
 	}
 
-    if runtime.GOOS != "android" {
+    if runtime.GOOS == "android" {
         // --- Create / reuse SDL window (single window per process) ---
         if globalSDLWindow == nil {
     		fmt.Println("[Ikemen] newWindow(): creating SDL window",
@@ -145,11 +145,11 @@ func (s *System) newWindow(w, h int) (*Window, error) {
     		}
     		globalSDLWindow = win
     	} else {
-    		fmt.Println("[Ikemen] newWindow(): reusing existing SDL window")
+    		fmt.Println("[Ikemen][ANDROID] Reusing existing SDL window")
     	}
 
     	window = globalSDLWindow
-    	window.SetResizable(true)
+    	window.SetResizable(false)
 
     	// Log window ID
     	if id, errID := window.GetID(); errID == nil {
@@ -509,9 +509,10 @@ func (w *Window) Close() {
 		}
 		w.Window = nil
 		// Clear the global sdl window cache we created for android
-		if runtime.GOOS == "android" {
+		// Android: DO NOT clear global SDL window – reuse always
+		/*if runtime.GOOS == "android" {
 			globalSDLWindow = nil
-		}
+		}*/
 	}
 	sdl.Quit()
 }
