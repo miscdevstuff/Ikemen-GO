@@ -1100,66 +1100,70 @@ func (r *Renderer_VK) GetName() string {
 }
 
 func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintptr) error {
-    var err error
-    var surface unsafe.Pointer
-    // Proper zero values for Vulkan structs
-    var zeroInstance vk.Instance
-    var zeroSurface  vk.Surface
+	var err error
+	var surface unsafe.Pointer
+	// Proper zero values for Vulkan structs
+	var zeroInstance vk.Instance
+	var zeroSurface vk.Surface
 
-    // === ANDROID: Instance + Surface already created in Init() ===
-    if runtime.GOOS == "android" && r.instance != zeroInstance && r.surface != zeroSurface {
-        fmt.Println("[Vulkan] Android: Reusing existing Instance + Surface")
-        vk.InitInstance(r.instance)
-        goto DEVICE_CREATE
-    }
-	// create a Vulkan instance.
-	instanceExtensions := sys.window.Window.VulkanGetInstanceExtensions()
-	for i := range instanceExtensions {
-		instanceExtensions[i] = fmt.Sprintf("%s\x00", instanceExtensions[i])
-	}
-	instanceCreateInfo := &vk.InstanceCreateInfo{
-		SType:                   vk.StructureTypeInstanceCreateInfo,
-		PApplicationInfo:        appInfo,
-		EnabledExtensionCount:   uint32(len(instanceExtensions)),
-		PpEnabledExtensionNames: instanceExtensions,
-		EnabledLayerCount:       0,
-		PpEnabledLayerNames:     []string{},
-	}
-	// This causes a crash with it in SDL and without it in GLFW on macOS. Have no idea why.
-	// if runtime.GOOS == "darwin" {
-	// 	instanceExtensions = append(instanceExtensions, vk.KhrPortabilityEnumerationExtensionName+"\x00")
-	// 	instanceCreateInfo.PpEnabledExtensionNames = instanceExtensions
-	// 	instanceCreateInfo.EnabledExtensionCount = uint32(len(instanceExtensions))
-	// 	instanceCreateInfo.Flags = vk.InstanceCreateFlags(vk.InstanceCreateEnumeratePortabilityBit)
-	// }
+	// Initialize vkDebug from config early so it applies to both paths
 	vkDebug = sys.cfg.Video.RendererDebugMode
-	if vkDebug {
-		if r.checkValidationLayerSupport() {
-			instanceCreateInfo.EnabledLayerCount = uint32(len(vk_validationLayers))
-			instanceCreateInfo.PpEnabledLayerNames = vk_validationLayers
-		} else {
-			log.Println("Vulkan validation layers requested but not available")
+
+	// === ANDROID: Instance + Surface already created in Init() ===
+	if runtime.GOOS == "android" && r.instance != zeroInstance && r.surface != zeroSurface {
+		fmt.Println("[Vulkan] Android: Reusing existing Instance + Surface")
+		vk.InitInstance(r.instance)
+	} else {
+		// create a Vulkan instance.
+		instanceExtensions := sys.window.Window.VulkanGetInstanceExtensions()
+		for i := range instanceExtensions {
+			instanceExtensions[i] = fmt.Sprintf("%s\x00", instanceExtensions[i])
 		}
-	}
-	var instance vk.Instance
-	err := vk.Error(vk.CreateInstance(instanceCreateInfo, nil, &instance))
-	if err != nil {
-		err = fmt.Errorf("vkCreateInstance failed with %s", err)
-		return err
-	}
-	r.instance = instance
-	vk.InitInstance(r.instance)
+		instanceCreateInfo := &vk.InstanceCreateInfo{
+			SType:                   vk.StructureTypeInstanceCreateInfo,
+			PApplicationInfo:        appInfo,
+			EnabledExtensionCount:   uint32(len(instanceExtensions)),
+			PpEnabledExtensionNames: instanceExtensions,
+			EnabledLayerCount:       0,
+			PpEnabledLayerNames:     []string{},
+		}
+		// This causes a crash with it in SDL and without it in GLFW on macOS. Have no idea why.
+		// if runtime.GOOS == "darwin" {
+		// 	instanceExtensions = append(instanceExtensions, vk.KhrPortabilityEnumerationExtensionName+"\x00")
+		// 	instanceCreateInfo.PpEnabledExtensionNames = instanceExtensions
+		// 	instanceCreateInfo.EnabledExtensionCount = uint32(len(instanceExtensions))
+		// 	instanceCreateInfo.Flags = vk.InstanceCreateFlags(vk.InstanceCreateEnumeratePortabilityBit)
+		// }
 
-	surface, err = sys.window.VulkanCreateSurface(r.instance)
-	if err != nil {
-		vk.DestroyInstance(r.instance, nil)
-		err = fmt.Errorf("vkCreateWindowSurface failed with %s", err)
-		return err
+		if vkDebug {
+			if r.checkValidationLayerSupport() {
+				instanceCreateInfo.EnabledLayerCount = uint32(len(vk_validationLayers))
+				instanceCreateInfo.PpEnabledLayerNames = vk_validationLayers
+			} else {
+				log.Println("Vulkan validation layers requested but not available")
+			}
+		}
+		var instance vk.Instance
+		// Use '=' because err is already declared at the function top level
+		err = vk.Error(vk.CreateInstance(instanceCreateInfo, nil, &instance))
+		if err != nil {
+			err = fmt.Errorf("vkCreateInstance failed with %s", err)
+			return err
+		}
+		r.instance = instance
+		vk.InitInstance(r.instance)
+
+		surface, err = sys.window.VulkanCreateSurface(r.instance)
+		if err != nil {
+			vk.DestroyInstance(r.instance, nil)
+			err = fmt.Errorf("vkCreateWindowSurface failed with %s", err)
+			return err
+		}
+
+		r.surface = vk.SurfaceFromPointer(uintptr(surface))
 	}
 
-	r.surface = vk.SurfaceFromPointer(uintptr(surface))
-
-DEVICE_CREATE:
+	// DEVICE_CREATE code path continues here (formerly the label)
 
 	if r.gpuDevices, err = r.getPhysicalDevices(r.instance); err != nil {
 		r.gpuDevices = nil
@@ -4694,184 +4698,193 @@ func (r *Renderer_VK) CreatePipelineCache() error {
 // Render initialization.
 // Creates the default shaders, the framebuffer and enables MSAA.
 func (r *Renderer_VK) Init() {
-    r.enableModel = sys.cfg.Video.EnableModel
-    r.enableShadow = sys.cfg.Video.EnableModelShadow
-    r.memoryTypeMap = make(map[vk.MemoryPropertyFlagBits]uint32)
-    r.samplers = map[VulkanSamplerInfo]vk.Sampler{}
-    r.stagingBufferFences = [2]bool{false, false}
-    r.stagingBufferIndex = 0
-    r.stagingBufferOffset = 0
-    r.stagingImageCopyRegions = make(map[vk.Image][]vk.BufferImageCopy)
-    r.VKState.VulkanModelPipelineState.VulkanModelSpecializationConstants1.useShadowMap = r.enableShadow
-    r.setVSync = false
+	r.enableModel = sys.cfg.Video.EnableModel
+	r.enableShadow = sys.cfg.Video.EnableModelShadow
+	r.memoryTypeMap = make(map[vk.MemoryPropertyFlagBits]uint32)
+	r.samplers = map[VulkanSamplerInfo]vk.Sampler{}
+	r.stagingBufferFences = [2]bool{false, false}
+	r.stagingBufferIndex = 0
+	r.stagingBufferOffset = 0
+	r.stagingImageCopyRegions = make(map[vk.Image][]vk.BufferImageCopy)
+	r.VKState.VulkanModelPipelineState.VulkanModelSpecializationConstants1.useShadowMap = r.enableShadow
+	r.setVSync = false
 
-    // === 1) Load Vulkan loader ===
-    vk.SetGetInstanceProcAddr(sdl.VulkanGetVkGetInstanceProcAddr())
-    if err := vk.Init(); err != nil {
-        panic(err)
-    }
+	// === 1) Load Vulkan loader ===
+	vk.SetGetInstanceProcAddr(sdl.VulkanGetVkGetInstanceProcAddr())
+	if err := vk.Init(); err != nil {
+		panic(err)
+	}
 
-    // === 2) SDL Required Instance Extensions ===
-    exts := sys.window.VulkanGetInstanceExtensions()
-    if len(exts) == 0 {
-        panic("SDL returned no Vulkan extensions")
-    }
-    fmt.Println("[Vulkan] Using SDL Instance Extensions:", exts)
+	// === 2) SDL Required Instance Extensions ===
+	exts := sys.window.VulkanGetInstanceExtensions()
+	if len(exts) == 0 {
+		panic("SDL returned no Vulkan extensions")
+	}
+	fmt.Println("[Vulkan] Using SDL Instance Extensions:", exts)
 
-    // === 3) Create Vulkan Instance using extensions ===
-    instance, err := vkCreateInstanceWithExts(exts)
-    if err != nil {
-        panic(err)
-    }
+	// === 3) Create Vulkan Instance using extensions ===
+	// Uses the helper function that now correctly null-terminates strings
+	instance, err := vkCreateInstanceWithExts(exts)
+	if err != nil {
+		panic(err)
+	}
 
-    // === 4) Create Surface NOW (Android-safe) ===
-    surfPtr, err := sys.window.VulkanCreateSurface(instance)
-    if err != nil {
-        panic(fmt.Errorf("SDL_Vulkan_CreateSurface failed: %w", err))
-    }
+	// === 4) Create Surface NOW (Android-safe) ===
+	surfPtr, err := sys.window.VulkanCreateSurface(instance)
+	if err != nil {
+		panic(fmt.Errorf("SDL_Vulkan_CreateSurface failed: %w", err))
+	}
 
-    // store for reuse
-    r.instance = instance
-    r.surface = vk.SurfaceFromPointer(uintptr(surfPtr))
+	// Store for reuse in NewVulkanDevice
+	r.instance = instance
+	r.surface = vk.SurfaceFromPointer(uintptr(surfPtr))
 
-    // === 5) Continue your ORIGINAL init flow ===
-    err = r.NewVulkanDevice(appInfo, 0) // Android doesn't need native window handle
-    if err != nil {
-        if len(r.gpuDevices) > 0 {
-            r.PrintInfo()
-        }
-        panic(err)
-    }
+	// === 5) Continue initialization ===
+	// appInfo must be defined globally or in the package scope
+	err = r.NewVulkanDevice(appInfo, 0) 
+	if err != nil {
+		if len(r.gpuDevices) > 0 {
+			r.PrintInfo()
+		}
+		panic(err)
+	}
 
-    err = r.CreateSwapchain()
-    if err != nil {
-        panic(err)
-    }
-    err = r.CreateMemoryBuffers()
-    if err != nil {
-        panic(err)
-    }
-    r.swapchainRenderPass, err = r.CreateSwapchainRenderPass(r.swapchains[0])
-    if err != nil {
-        panic(err)
-    }
-    msaa := sys.msaa
-    if msaa <= 0 {
-        msaa = 1
-    }
-    r.mainRenderPass, err = r.CreateMainRenderPass(r.swapchains[0], msaa, true)
-    if err != nil {
-        panic(err)
-    }
-    r.postProcessingRenderPass, err = r.CreatePostProcessingRenderPass(r.swapchains[0])
-    if err != nil {
-        panic(err)
-    }
-    r.CreatePipelineCache()
-    r.spriteProgram, err = r.CreateSpriteProgram()
-    if err != nil {
-        panic(err)
-    }
+	err = r.CreateSwapchain()
+	if err != nil {
+		panic(err)
+	}
+	err = r.CreateMemoryBuffers()
+	if err != nil {
+		panic(err)
+	}
+	r.swapchainRenderPass, err = r.CreateSwapchainRenderPass(r.swapchains[0])
+	if err != nil {
+		panic(err)
+	}
+	msaa := sys.msaa
+	if msaa <= 0 {
+		msaa = 1
+	}
+	r.mainRenderPass, err = r.CreateMainRenderPass(r.swapchains[0], msaa, true)
+	if err != nil {
+		panic(err)
+	}
+	r.postProcessingRenderPass, err = r.CreatePostProcessingRenderPass(r.swapchains[0])
+	if err != nil {
+		panic(err)
+	}
+	r.CreatePipelineCache()
+	r.spriteProgram, err = r.CreateSpriteProgram()
+	if err != nil {
+		panic(err)
+	}
 
-    r.postProcessingProgram, err = r.CreateFullScreenShaderProgram(sys.externalShaders)
-    if err != nil {
-        panic(err)
-    }
+	r.postProcessingProgram, err = r.CreateFullScreenShaderProgram(sys.externalShaders)
+	if err != nil {
+		panic(err)
+	}
 
-    r.panoramaToCubeMapProgram, err = r.CreatePanoramaToCubeMapProgram()
-    if err != nil {
-        panic(err)
-    }
+	r.panoramaToCubeMapProgram, err = r.CreatePanoramaToCubeMapProgram()
+	if err != nil {
+		panic(err)
+	}
 
-    r.cubemapFilteringProgram, err = r.CreateCubemapFilteringProgram()
-    if err != nil {
-        panic(err)
-    }
-    r.lutProgram, err = r.CreateLutProgram()
-    if err != nil {
-        panic(err)
-    }
-    err = r.CreateSpriteSampler()
-    if err != nil {
-        panic(err)
-    }
-    err = r.CreateCommandPool()
-    if err != nil {
-        panic(err)
-    }
-    err = r.CreateCommandBuffer()
-    if err != nil {
-        panic(err)
-    }
-    r.renderTargets[0] = r.CreateRenderTarget(r.swapchainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), 1, false)
-    r.renderTargets[1] = r.CreateRenderTarget(r.swapchainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), 1, false)
-    r.mainRenderTarget = r.CreateRenderTarget(r.mainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), msaa, true)
+	r.cubemapFilteringProgram, err = r.CreateCubemapFilteringProgram()
+	if err != nil {
+		panic(err)
+	}
+	r.lutProgram, err = r.CreateLutProgram()
+	if err != nil {
+		panic(err)
+	}
+	err = r.CreateSpriteSampler()
+	if err != nil {
+		panic(err)
+	}
+	err = r.CreateCommandPool()
+	if err != nil {
+		panic(err)
+	}
+	err = r.CreateCommandBuffer()
+	if err != nil {
+		panic(err)
+	}
+	r.renderTargets[0] = r.CreateRenderTarget(r.swapchainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), 1, false)
+	r.renderTargets[1] = r.CreateRenderTarget(r.swapchainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), 1, false)
+	r.mainRenderTarget = r.CreateRenderTarget(r.mainRenderPass.renderPass, uint32(sys.scrrect[2]), uint32(sys.scrrect[3]), msaa, true)
 
-    err = r.CreateSyncObjects()
-    if err != nil {
-        panic(err)
-    }
-    err = r.CreateSwapChainFramebuffer(r.swapchains[0], r.swapchainRenderPass.renderPass)
-    if err != nil {
-        panic(err)
-    }
-    r.CreateDescriptorPool()
-    r.VKState.scissor = vk.Rect2D{
-        Extent: r.swapchains[0].extent,
-        Offset: vk.Offset2D{
-            X: 0, Y: 0,
-        },
-    }
-    r.dummyTexture = r.newTexture(1, 1, 8, false).(*Texture_VK)
-    r.dummyTexture.SetData([]byte{0})
-    r.dummyTexture.sampler = r.spriteSamplers[0]
+	err = r.CreateSyncObjects()
+	if err != nil {
+		panic(err)
+	}
+	err = r.CreateSwapChainFramebuffer(r.swapchains[0], r.swapchainRenderPass.renderPass)
+	if err != nil {
+		panic(err)
+	}
+	r.CreateDescriptorPool()
+	r.VKState.scissor = vk.Rect2D{
+		Extent: r.swapchains[0].extent,
+		Offset: vk.Offset2D{
+			X: 0, Y: 0,
+		},
+	}
+	r.dummyTexture = r.newTexture(1, 1, 8, false).(*Texture_VK)
+	r.dummyTexture.SetData([]byte{0})
+	r.dummyTexture.sampler = r.spriteSamplers[0]
 
-    r.dummyCubeTexture = r.newDummyCubeMapTexture().(*Texture_VK)
-    r.dummyCubeTexture.SetCubeMapData([]byte{0})
-    r.dummyCubeTexture.sampler = r.spriteSamplers[0]
+	r.dummyCubeTexture = r.newDummyCubeMapTexture().(*Texture_VK)
+	r.dummyCubeTexture.SetCubeMapData([]byte{0})
+	r.dummyCubeTexture.sampler = r.spriteSamplers[0]
 
-    r.spriteProgram.uniformOffsetMap = map[interface{}]uint32{}
-    r.createPalTexture(2048)
-    r.shadowMapTextures = r.createShadowMapTexture(1024)
-    if r.enableModel {
-        r.modelProgram, err = r.CreateModelProgram()
-        if err != nil {
-            panic(err)
-        }
-        if r.enableShadow {
-            r.shadowMapProgram, err = r.CreateShadowMapProgram()
-            if err != nil {
-                panic(err)
-            }
-        }
-    }
-    r.destroyResourceQueues[0] = make(chan VulkanResource, 65536)
-    r.destroyResourceQueues[1] = make(chan VulkanResource, 65536)
-    r.destroyResourceQueueIndex = 0
+	r.spriteProgram.uniformOffsetMap = map[interface{}]uint32{}
+	r.createPalTexture(2048)
+	r.shadowMapTextures = r.createShadowMapTexture(1024)
+	if r.enableModel {
+		r.modelProgram, err = r.CreateModelProgram()
+		if err != nil {
+			panic(err)
+		}
+		if r.enableShadow {
+			r.shadowMapProgram, err = r.CreateShadowMapProgram()
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+	r.destroyResourceQueues[0] = make(chan VulkanResource, 65536)
+	r.destroyResourceQueues[1] = make(chan VulkanResource, 65536)
+	r.destroyResourceQueueIndex = 0
 }
 
 func vkCreateInstanceWithExts(exts []string) (vk.Instance, error) {
-    var zero vk.Instance
+	var zero vk.Instance
 
-    if len(exts) == 0 {
-        return zero, fmt.Errorf("no Vulkan extensions provided")
-    }
+	if len(exts) == 0 {
+		return zero, fmt.Errorf("no Vulkan extensions provided")
+	}
 
-    createInfo := vk.InstanceCreateInfo{
-        SType:                    vk.StructureTypeInstanceCreateInfo,
-        PApplicationInfo:         appInfo,
-        EnabledExtensionCount:    uint32(len(exts)),
-        PpEnabledExtensionNames:  exts,
-    }
+	// IMPORTANT: SDL returns Go strings, but Vulkan expects C-strings (null-terminated).
+	// We must create a copy with "\x00" appended.
+	safeExts := make([]string, len(exts))
+	for i, e := range exts {
+		safeExts[i] = e + "\x00"
+	}
 
-    var instance vk.Instance
+	createInfo := &vk.InstanceCreateInfo{
+		SType:                   vk.StructureTypeInstanceCreateInfo,
+		PApplicationInfo:        appInfo, // Ensure appInfo is defined globally or passed in
+		EnabledExtensionCount:   uint32(len(safeExts)),
+		PpEnabledExtensionNames: safeExts,
+	}
 
-    res := vk.CreateInstance(&createInfo, nil, &instance)
-    if res != vk.Success {
-        return zero, fmt.Errorf("vkCreateInstance failed: %v", res)
-    }
+	var instance vk.Instance
+	// Note: vk.CreateInstance expects a pointer to CreateInfo
+	res := vk.Error(vk.CreateInstance(createInfo, nil, &instance))
+	if res != nil {
+		return zero, fmt.Errorf("vkCreateInstance failed: %v", res)
+	}
 
-    return instance, nil
+	return instance, nil
 }
 
 func (r *Renderer_VK) Close() {
