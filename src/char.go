@@ -3182,10 +3182,10 @@ func (c *Char) ocd() *OverrideCharData {
 	if team < 0 || team > 2 || c.memberNo < 0 {
 		return newOverrideCharData()
 	}
-	if sys.sel.launchFightParams == nil {
-		sys.sel.launchFightParams = newLaunchFightParams()
+	if sys.sel.gameParams == nil {
+		sys.sel.gameParams = newGameParams()
 	}
-	return sys.sel.launchFightParams.ensureOverride(team, c.memberNo)
+	return sys.sel.gameParams.ensureOverride(team, c.memberNo)
 }
 
 func (c *Char) load(def string) error {
@@ -3804,7 +3804,7 @@ func (c *Char) load(def string) error {
 		sprite_resolved := resolvePathRelativeToDef(sprite)
 		if err := LoadFile(&sprite_resolved, []string{gi.def, "", sys.motif.Def, "data/"}, func(filename string) error {
 			var err_sff error
-			gi.sff, err_sff = loadSff(filename, true) // loadSff uses OpenFile
+			gi.sff, err_sff = loadSff(filename, true, false) // loadSff uses OpenFile
 			return err_sff
 		}); err != nil {
 			return err
@@ -4091,14 +4091,14 @@ func (c *Char) loadFx(def string) error {
 						resolved_path := resolvePathRelativeToDef(fx_path)
 
 						if found_path := FileExist(resolved_path); found_path != "" {
-							if err := loadFightFx(found_path, false); err != nil {
+							if err := loadFightFx(found_path, false, false); err != nil {
 								sys.errLog.Printf("Could not load CommonFX %s for char %s: %v", found_path, def, err)
 							} else {
 								gi.fxPath = append(gi.fxPath, found_path)
 							}
 						} else {
 							if found_path_fallback := SearchFile(fx_path, []string{def, "", sys.motif.Def, "data/"}); found_path_fallback != "" {
-								if err := loadFightFx(found_path_fallback, false); err != nil {
+								if err := loadFightFx(found_path_fallback, false, false); err != nil {
 									sys.errLog.Printf("Could not load CommonFX %s for char %s: %v", found_path_fallback, def, err)
 								} else {
 									gi.fxPath = append(gi.fxPath, found_path_fallback)
@@ -4122,7 +4122,7 @@ func (c *Char) loadFx(def string) error {
 						}
 						resolved_fx_path := resolvePathRelativeToDef(fx_path)
 						if resolved_fx_path != "" {
-							if err := loadFightFx(resolved_fx_path, false); err != nil {
+							if err := loadFightFx(resolved_fx_path, false, false); err != nil {
 								sys.errLog.Printf("Could not load CommonFX %s for char %s: %v", resolved_fx_path, def, err)
 							} else {
 								gi.fxPath = append(gi.fxPath, resolved_fx_path)

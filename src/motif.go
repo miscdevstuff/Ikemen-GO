@@ -1,10 +1,9 @@
 package main
 
 import (
-	"bytes"
 	_ "embed" // Support for go:embed resources
-	"encoding/json"
 	"fmt"
+	"io/fs"
 	"math"
 	"math/rand"
 	"os"
@@ -112,17 +111,21 @@ type FadeProperties struct {
 }
 
 type AnimationProperties struct {
-	Anim       int32      `ini:"anim" default:"-1"`
-	Spr        [2]int32   `ini:"spr" default:"-1,0"`
-	Offset     [2]float32 `ini:"offset"`
-	Facing     int32      `ini:"facing" default:"1"`
-	Scale      [2]float32 `ini:"scale" default:"1,1"`
-	Xshear     float32    `ini:"xshear"`
-	Angle      float32    `ini:"angle"`
-	Layerno    int16      `ini:"layerno" default:"1"`
-	Window     [4]int32   `ini:"window"`
-	Localcoord [2]int32   `ini:"localcoord"`
-	AnimData   *Anim
+	Anim        int32      `ini:"anim" default:"-1"`
+	Spr         [2]int32   `ini:"spr" default:"-1,0"`
+	Offset      [2]float32 `ini:"offset"`
+	Facing      int32      `ini:"facing" default:"1"`
+	Scale       [2]float32 `ini:"scale" default:"1,1"`
+	Xshear      float32    `ini:"xshear"`
+	Angle       float32    `ini:"angle"`
+	XAngle      float32    `ini:"xangle"`
+	YAngle      float32    `ini:"yangle"`
+	Projection  string     `ini:"projection" default:"orthographic"`
+	Focallength float32    `ini:"focallength" default:"2048"`
+	Layerno     int16      `ini:"layerno" default:"1"`
+	Window      [4]int32   `ini:"window"`
+	Localcoord  [2]int32   `ini:"localcoord"`
+	AnimData    *Anim
 }
 
 type AnimationTextProperties struct {
@@ -133,6 +136,10 @@ type AnimationTextProperties struct {
 	Scale          [2]float32 `ini:"scale" default:"1,1"`
 	Xshear         float32    `ini:"xshear"`
 	Angle          float32    `ini:"angle"`
+	XAngle         float32    `ini:"xangle"`
+	YAngle         float32    `ini:"yangle"`
+	Projection     string     `ini:"projection" default:"orthographic"`
+	Focallength    float32    `ini:"focallength" default:"2048"`
 	Layerno        int16      `ini:"layerno" default:"1"`
 	Window         [4]int32   `ini:"window"`
 	Localcoord     [2]int32   `ini:"localcoord"`
@@ -143,32 +150,41 @@ type AnimationTextProperties struct {
 }
 
 type AnimationCharPreloadProperties struct {
-	Anim       int32      `ini:"anim" default:"-1" preload:"char"`
-	Spr        [2]int32   `ini:"spr" default:"-1,0" preload:"char"`
-	Offset     [2]float32 `ini:"offset"`
-	Facing     int32      `ini:"facing" default:"1"`
-	Scale      [2]float32 `ini:"scale" default:"1,1"`
-	Xshear     float32    `ini:"xshear"`
-	Angle      float32    `ini:"angle"`
-	Layerno    int16      `ini:"layerno" default:"1"`
-	Window     [4]int32   `ini:"window"`
-	Localcoord [2]int32   `ini:"localcoord"`
-	AnimData   *Anim
-	ApplyPal   bool `ini:"applypal" preload:"pal"`
+	Anim        int32      `ini:"anim" default:"-1" preload:"char"`
+	Spr         [2]int32   `ini:"spr" default:"-1,0" preload:"char"`
+	Offset      [2]float32 `ini:"offset"`
+	Facing      int32      `ini:"facing" default:"1"`
+	Scale       [2]float32 `ini:"scale" default:"1,1"`
+	Xshear      float32    `ini:"xshear"`
+	Angle       float32    `ini:"angle"`
+	XAngle      float32    `ini:"xangle"`
+	YAngle      float32    `ini:"yangle"`
+	Projection  string     `ini:"projection" default:"orthographic"`
+	Focallength float32    `ini:"focallength" default:"2048"`
+	Layerno     int16      `ini:"layerno" default:"1"`
+	Window      [4]int32   `ini:"window"`
+	Localcoord  [2]int32   `ini:"localcoord"`
+	AnimData    *Anim
+	ApplyPal    bool  `ini:"applypal" preload:"pal"`
+	DrawOrder   int32 `ini:"draworder"`
 }
 
 type AnimationStagePreloadProperties struct {
-	Anim       int32      `ini:"anim" default:"-1" preload:"stage"`
-	Spr        [2]int32   `ini:"spr" default:"-1,0" preload:"stage"`
-	Offset     [2]float32 `ini:"offset"`
-	Facing     int32      `ini:"facing" default:"1"`
-	Scale      [2]float32 `ini:"scale" default:"1,1"`
-	Xshear     float32    `ini:"xshear"`
-	Angle      float32    `ini:"angle"`
-	Layerno    int16      `ini:"layerno" default:"1"`
-	Window     [4]int32   `ini:"window"`
-	Localcoord [2]int32   `ini:"localcoord"`
-	AnimData   *Anim
+	Anim        int32      `ini:"anim" default:"-1" preload:"stage"`
+	Spr         [2]int32   `ini:"spr" default:"-1,0" preload:"stage"`
+	Offset      [2]float32 `ini:"offset"`
+	Facing      int32      `ini:"facing" default:"1"`
+	Scale       [2]float32 `ini:"scale" default:"1,1"`
+	Xshear      float32    `ini:"xshear"`
+	Angle       float32    `ini:"angle"`
+	XAngle      float32    `ini:"xangle"`
+	YAngle      float32    `ini:"yangle"`
+	Projection  string     `ini:"projection" default:"orthographic"`
+	Focallength float32    `ini:"focallength" default:"2048"`
+	Layerno     int16      `ini:"layerno" default:"1"`
+	Window      [4]int32   `ini:"window"`
+	Localcoord  [2]int32   `ini:"localcoord"`
+	AnimData    *Anim
 }
 
 type TextProperties struct {
@@ -177,6 +193,10 @@ type TextProperties struct {
 	Scale          [2]float32 `ini:"scale" default:"1,1"`
 	Xshear         float32    `ini:"xshear"`
 	Angle          float32    `ini:"angle"`
+	XAngle         float32    `ini:"xangle"`
+	YAngle         float32    `ini:"yangle"`
+	Projection     string     `ini:"projection" default:"orthographic"`
+	Focallength    float32    `ini:"focallength" default:"2048"`
 	Text           string     `ini:"text"`
 	Layerno        int16      `ini:"layerno" default:"1"`
 	Window         [4]int32   `ini:"window"`
@@ -190,6 +210,10 @@ type TextMapProperties struct {
 	Scale          [2]float32        `ini:"scale" default:"1,1"`
 	Xshear         float32           `ini:"xshear"`
 	Angle          float32           `ini:"angle"`
+	XAngle         float32           `ini:"xangle"`
+	YAngle         float32           `ini:"yangle"`
+	Projection     string            `ini:"projection" default:"orthographic"`
+	Focallength    float32           `ini:"focallength" default:"2048"`
 	Text           map[string]string `ini:"text"`
 	Layerno        int16             `ini:"layerno" default:"1"`
 	Window         [4]int32          `ini:"window"`
@@ -337,9 +361,16 @@ type InfoBoxProperties struct {
 }
 
 type CellOverrideProperties struct {
-	Offset [2]float32 `ini:"offset"`
-	Facing int32      `ini:"facing" default:"1"`
-	Skip   bool       `ini:"skip"`
+	Offset      [2]float32 `ini:"offset"`
+	Facing      int32      `ini:"facing" default:"1"`
+	Skip        bool       `ini:"skip"`
+	Scale       [2]float32 `ini:"scale"`
+	XShear      float32    `ini:"xshear"`
+	Angle       float32    `ini:"angle"`
+	XAngle      float32    `ini:"xangle"`
+	YAngle      float32    `ini:"yangle"`
+	Projection  string     `ini:"projection" default:"orthographic"`
+	FocalLength float32    `ini:"focallength"`
 }
 
 type TimerProperties struct {
@@ -554,9 +585,18 @@ type PlayerVsProperties struct {
 	} `ini:"value"`
 }
 
+type PlayerLoseProperties struct {
+	FaceProperties
+	Darken int32 `ini:"darken"`
+}
+
 type PlayerVictoryProperties struct {
 	FaceProperties
-	Face2    FaceProperties `ini:"face2"`
+	Lose  PlayerLoseProperties `ini:"lose"`
+	Face2 struct {
+		FaceProperties
+		Lose PlayerLoseProperties `ini:"lose"`
+	}
 	Name     TextProperties `ini:"name"`
 	State    []int32        `ini:"state"`
 	Teammate struct {
@@ -659,7 +699,7 @@ type SelectInfoProperties struct {
 			AnimationProperties
 			SwitchTime int32 `ini:"switchtime"`
 		} `ini:"random"`
-		MapCell map[string]*CellOverrideProperties `ini:"map:^[0-9]+-[0-9]+$" lua:""`
+		MapCell map[string]*CellOverrideProperties `ini:"map:^[0-9*]+-[0-9*]+$" lua:""`
 	} `ini:"cell"`
 	P1      PlayerSelectProperties `ini:"p1"`
 	P2      PlayerSelectProperties `ini:"p2"`
@@ -718,6 +758,7 @@ type SelectInfoProperties struct {
 	} `ini:"cancel"`
 	Portrait AnimationProperties `ini:"portrait"`
 	Title    TextMapProperties   `ini:"title"`
+	Record   TextMapProperties   `ini:"record"`
 	TeamMenu struct {
 		Move struct {
 			Wrapping bool `ini:"wrapping"`
@@ -725,7 +766,6 @@ type SelectInfoProperties struct {
 		Itemname map[string]*TeamModesProperties `ini:"itemname"`
 	} `ini:"teammenu"`
 	Timer         TimerProperties `ini:"timer"`
-	Record        TextProperties  `ini:"record"`
 	PaletteSelect int32           `ini:"paletteselect"`
 }
 
@@ -896,8 +936,11 @@ type StoryboardProperties struct {
 }
 
 type VictoryScreenProperties struct {
-	Enabled bool `ini:"enabled"`
-	Sounds  struct {
+	Enabled  bool `ini:"enabled"`
+	KeepSide struct {
+		Enabled bool `ini:"enabled"`
+	} `ini:"keepside"`
+	Sounds struct {
 		Enabled bool `ini:"enabled"`
 	} `ini:"sounds"`
 	Cpu struct {
@@ -914,6 +957,7 @@ type VictoryScreenProperties struct {
 	FadeIn   FadeProperties `ini:"fadein"`
 	FadeOut  FadeProperties `ini:"fadeout"`
 	Time     int32          `ini:"time"`
+	WinName  TextProperties `ini:"winname"`
 	WinQuote struct {
 		TextProperties
 		TextSpacing float32 `ini:"textspacing"`
@@ -943,8 +987,9 @@ type WinScreenProperties struct {
 	Sounds  struct {
 		Enabled bool `ini:"enabled"`
 	} `ini:"sounds"`
-	FadeIn  FadeProperties `ini:"fadein"`
-	FadeOut FadeProperties `ini:"fadeout"`
+	Results map[string]string `ini:"results"`
+	FadeIn  FadeProperties    `ini:"fadein"`
+	FadeOut FadeProperties    `ini:"fadeout"`
 	Pose    struct {
 		Time int32 `ini:"time"`
 	} `ini:"pose"`
@@ -1445,6 +1490,40 @@ func reserveUserFontSlots(m *Motif) {
 	}
 }
 
+// returns a stable-sorted list of files named "system.def" located anywhere under the given root (e.g. external/mods), including nested subdirs.
+func findExternalModSystemDefs(root string) ([]string, error) {
+	st, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !st.IsDir() {
+		return nil, nil
+	}
+
+	var out []string
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		// Match filename, case-insensitive
+		if strings.EqualFold(d.Name(), "system.def") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // loadMotif loads and parses the INI file into a Motif struct.
 func loadMotif(def string) (*Motif, error) {
 	if def == "" {
@@ -1477,13 +1556,35 @@ func loadMotif(def string) (*Motif, error) {
 	var defaultOnlyIni *ini.File
 
 	if err := LoadFile(&def, []string{def, "", "data/"}, func(filename string) error {
+		def = filename
+
+		// Inline-append any external/mods/**/system.def files before parsing.
+		modSystemDefs, err := findExternalModSystemDefs(filepath.FromSlash("external/mods"))
+		if err != nil {
+			return fmt.Errorf("Failed to discover external mod system.def files: %w", err)
+		}
+
 		inputBytes, err := LoadText(filename)
 		if err != nil {
 			return fmt.Errorf("Failed to load text from %s: %w", filename, err)
 		}
 
+		var modsConcat strings.Builder
+		for _, p := range modSystemDefs {
+			txt, err := LoadText(p)
+			if err != nil {
+				return fmt.Errorf("Failed to load mod system.def from %s: %w", p, err)
+			}
+			modsConcat.WriteString(txt)
+			if !strings.HasSuffix(txt, "\n") {
+				modsConcat.WriteString("\n")
+			}
+		}
+
 		// Preprocess and load INI sources from memory.
-		normalizedInput := []byte(preprocessINIContent(NormalizeNewlines(string(inputBytes))))
+		// Mods go on top so the motif file (last) can override them.
+		combined := modsConcat.String() + NormalizeNewlines(string(inputBytes))
+		normalizedInput := []byte(preprocessINIContent(combined))
 		normalizedDefault := []byte(preprocessINIContent(NormalizeNewlines(string(defaultMotif))))
 
 		// Load merged INI: defaults first, then user (user overrides)
@@ -1653,15 +1754,6 @@ func loadMotif(def string) (*Motif, error) {
 	return &m, nil
 }
 
-// InheritSpec describes how to inherit keys from one prefix to another inside the given INI sections.
-// Example: srcSec="Option Info", srcPrefix="menu.", dstSec="Option Info", dstPrefix="keymenu.menu."
-type InheritSpec struct {
-	SrcSec    string
-	SrcPrefix string
-	DstSec    string
-	DstPrefix string
-}
-
 // Propagates movelist.glyphs defaults
 func (m *Motif) applyGlyphDefaultsFromMovelist() {
 	if m == nil {
@@ -1780,6 +1872,15 @@ func (m *Motif) fixLocalcoordOverrides() {
 			}
 		}
 	}
+}
+
+// InheritSpec describes how to inherit keys from one prefix to another inside the given INI sections.
+// Example: srcSec="Option Info", srcPrefix="menu.", dstSec="Option Info", dstPrefix="keymenu.menu."
+type InheritSpec struct {
+	SrcSec    string
+	SrcPrefix string
+	DstSec    string
+	DstPrefix string
 }
 
 // mergeWithInheritance applies "user overrides default" with intra-file inheritance.
@@ -1997,7 +2098,7 @@ func (m *Motif) loadBgDefProperties(bgDef *BgDefProperties, bgname, spr string) 
 		LoadFile(&bgDef.Spr, []string{bgDef.Spr, m.Def, "", "data/"}, func(filename string) error {
 			if filename != "" {
 				var err error
-				bgDef.Sff, err = loadSff(filename, false)
+				bgDef.Sff, err = loadSff(filename, false, true)
 				if err != nil {
 					sys.errLog.Printf("Failed to load %v: %v", filename, err)
 				}
@@ -2025,7 +2126,7 @@ func (m *Motif) loadFiles() {
 	LoadFile(&m.Files.Spr, []string{m.Files.Spr}, func(filename string) error {
 		if filename != "" {
 			var err error
-			m.Sff, err = loadSff(filename, false)
+			m.Sff, err = loadSff(filename, false, true)
 			if err != nil {
 				sys.errLog.Printf("Failed to load %v: %v", filename, err)
 			}
@@ -2040,7 +2141,7 @@ func (m *Motif) loadFiles() {
 	LoadFile(&m.Files.Glyphs, []string{m.Files.Glyphs}, func(filename string) error {
 		if filename != "" {
 			var err error
-			m.GlyphsSff, err = loadSff(filename, false)
+			m.GlyphsSff, err = loadSff(filename, false, true)
 			if err != nil {
 				sys.errLog.Printf("Failed to load %v: %v", filename, err)
 			}
@@ -2502,6 +2603,7 @@ func (mo *Motif) processStateChange(c *Char, states []int32) bool {
 	return false
 }
 
+// processStateTransitions applies state changes by win/lose outcome.
 func (mo *Motif) processStateTransitions(winnerState, winnerTeammateState, loserState, loserTeammateState []int32) {
 	isWinnerLeader, isLoserLeader := false, false
 	for _, p := range sys.chars {
@@ -2529,54 +2631,65 @@ func (mo *Motif) processStateTransitions(winnerState, winnerTeammateState, loser
 	}
 }
 
-// replaceFormatSpecifiers converts Lua 5.1/C-style format specifiers
-// to Go's fmt.Sprintf equivalents where they differ.
-func (mo *Motif) replaceFormatSpecifiers(input string) string {
-	// Verbs that exist in Lua's string.format/C but not in Go's fmt: %i, %u, %I
-	// Everything else we care about (%d, %o, %x, %X, %e, %E, %f, %g, %G, %c, %s, %q, %p, %%) is already understood by fmt.
-	var formatSpecifierMap = map[string]string{
-		"i": "d",
-		"I": "d",
-		"u": "d",
-	}
-	re := regexp.MustCompile(`%%|%([-+ #0]*)?(\d+)?(\.\d+)?([hlLzjt]*)?([a-zA-Z])`)
+// applies state changes by team side, not by win/lose outcome.
+func (mo *Motif) processStateTransitionsBySide(p1State, p1TeammateState, p2State, p2TeammateState []int32) {
+	// Track whether we've assigned a "leader" state for each side.
+	leaderDone := [2]bool{false, false}
 
-	return re.ReplaceAllStringFunc(input, func(match string) string {
-		// Keep literal %%
-		if match == "%%" {
-			return "%%"
+	// Helper to choose state slices by side.
+	getStates := func(side int) (leader []int32, mate []int32) {
+		if side == 0 {
+			return p1State, p1TeammateState
 		}
-		sub := re.FindStringSubmatch(match)
-		if len(sub) != 6 {
-			return match // should not happen, but be safe
+		return p2State, p2TeammateState
+	}
+
+	// 1) Prefer applying leader state to the actual team leader (if available).
+	// sys.teamLeader[] is used elsewhere in this file, so it should be stable here too.
+	for side := 0; side < 2; side++ {
+		leaderPn := sys.teamLeader[side]
+		if leaderPn < 0 || leaderPn >= len(sys.chars) || len(sys.chars[leaderPn]) == 0 {
+			continue
 		}
-		flags := sub[1]
-		width := sub[2]
-		precision := sub[3]
-		// length := sub[4] // dropped for Go
-		verb := sub[5]
-		// Map Lua/C-only verbs to Go equivalents
-		if mapped, ok := formatSpecifierMap[verb]; ok {
-			verb = mapped
+		c := sys.chars[leaderPn][0]
+		// Only accept if the character is actually on that side.
+		if int(c.teamside) != side {
+			continue
 		}
-		// Rebuild without the C length modifier.
-		var b strings.Builder
-		b.WriteByte('%')
-		if flags != "" {
-			b.WriteString(flags)
+		ls, _ := getStates(side)
+		mo.processStateChange(c, ls)
+		leaderDone[side] = true
+	}
+
+	// 2) Apply remaining members in stable playerNo order.
+	// First encountered member becomes leader if we couldn't resolve a leader above.
+	for pn, p := range sys.chars {
+		if len(p) == 0 {
+			continue
 		}
-		if width != "" {
-			b.WriteString(width)
+		c := p[0]
+		side := int(c.teamside)
+		if side < 0 || side > 1 {
+			continue
 		}
-		if precision != "" {
-			b.WriteString(precision)
+
+		// If we already applied to the explicit leaderPn, skip it here.
+		if leaderDone[side] && pn == sys.teamLeader[side] {
+			continue
 		}
-		b.WriteString(verb)
-		return b.String()
-	})
+
+		ls, ms := getStates(side)
+		if !leaderDone[side] {
+			mo.processStateChange(c, ls)
+			leaderDone[side] = true
+		} else {
+			mo.processStateChange(c, ms)
+		}
+	}
 }
 
 func (m *Motif) reset() {
+	m.textsprite = []*TextSprite{}
 	if m.IniFile == nil {
 		return
 	}
@@ -2591,7 +2704,6 @@ func (m *Motif) reset() {
 	m.wi.reset(m)
 	m.hi.reset(m)
 	m.co.reset(m)
-	m.textsprite = []*TextSprite{}
 	//sys.storyboard.reset()
 	m.me.reset(m)
 }
@@ -2842,11 +2954,7 @@ func (m *Motif) act() {
 	}
 }
 
-func (m *Motif) setMotifScale(localcoord [2]int32) {
-	// not needed
-}
-
-func FormatTimeText(text string, totalSec float64) string {
+func formatTimeText(text string, totalSec float64) string {
 	h := int(totalSec / 3600)
 	m := int(totalSec/60) % 60
 	s := int(totalSec) % 60
@@ -2863,6 +2971,76 @@ func FormatTimeText(text string, totalSec float64) string {
 	return result
 }
 
+// replaceFormatSpecifiers converts Lua 5.1/C-style format specifiers
+// to Go's fmt.Sprintf equivalents where they differ.
+func (mo *Motif) replaceFormatSpecifiers(input string) string {
+	// Verbs that exist in Lua's string.format/C but not in Go's fmt: %i, %u, %I
+	// Everything else we care about (%d, %o, %x, %X, %e, %E, %f, %g, %G, %c, %s, %q, %p, %%) is already understood by fmt.
+	var formatSpecifierMap = map[string]string{
+		"i": "d",
+		"I": "d",
+		"u": "d",
+	}
+	re := regexp.MustCompile(`%%|%([-+ #0]*)?(\d+)?(\.\d+)?([hlLzjt]*)?([a-zA-Z])`)
+
+	return re.ReplaceAllStringFunc(input, func(match string) string {
+		// Keep literal %%
+		if match == "%%" {
+			return "%%"
+		}
+		sub := re.FindStringSubmatch(match)
+		if len(sub) != 6 {
+			return match // should not happen, but be safe
+		}
+		flags := sub[1]
+		width := sub[2]
+		precision := sub[3]
+		// length := sub[4] // dropped for Go
+		verb := sub[5]
+		// Map Lua/C-only verbs to Go equivalents
+		if mapped, ok := formatSpecifierMap[verb]; ok {
+			verb = mapped
+		}
+		// Rebuild without the C length modifier.
+		var b strings.Builder
+		b.WriteByte('%')
+		if flags != "" {
+			b.WriteString(flags)
+		}
+		if width != "" {
+			b.WriteString(width)
+		}
+		if precision != "" {
+			b.WriteString(precision)
+		}
+		b.WriteString(verb)
+		return b.String()
+	})
+}
+
+// Counts fmt verbs in a format string, ignoring literal %%.
+func countFmtVerbs(format string) int {
+	re := regexp.MustCompile(`%%|%([-+ #0]*)?(\d+)?(\.\d+)?([hlLzjt]*)?([a-zA-Z])`)
+	matches := re.FindAllString(format, -1)
+	n := 0
+	for _, m := range matches {
+		if m != "%%" {
+			n++
+		}
+	}
+	return n
+}
+
+// fmt.Sprintf helper. Normalizes Lua/C-style verbs, supports any number of args
+func (mo *Motif) sprintf(format string, args ...interface{}) string {
+	fs := mo.replaceFormatSpecifiers(format)
+	// Trim extra args so legacy one-placeholder strings still work when callers pass (wins, losses).
+	if n := countFmtVerbs(fs); n >= 0 && len(args) > n {
+		args = args[:n]
+	}
+	return fmt.Sprintf(fs, args...)
+}
+
 type MotifMenu struct {
 	enabled     bool
 	active      bool
@@ -2877,6 +3055,9 @@ func (me *MotifMenu) reset(m *Motif) {
 	me.endTimer = -1
 	if !m.di.active {
 		sys.applyFightAspect()
+	}
+	if err := sys.luaLState.DoString("menuReset()"); err != nil {
+		sys.luaLState.RaiseError("Error executing Lua code: %v\n", err.Error())
 	}
 }
 
@@ -3078,7 +3259,7 @@ func (co *MotifContinue) updateCreditsText(m *Motif) {
 func (co *MotifContinue) init(m *Motif) {
 	if (!m.ContinueScreen.Enabled || !co.enabled || sys.cfg.Options.QuickContinue) ||
 		(sys.winnerTeam() != 0 && sys.winnerTeam() != int32(sys.home)+1) ||
-		!sys.sel.launchFightParams.Continue {
+		!sys.sel.gameParams.Continue {
 		co.initialized = true
 		return
 	}
@@ -3881,7 +4062,24 @@ func (di *MotifDialogue) buildFaceAnim(m *Motif, side, pn, grp, idx int, faceCfg
 
 	a.facing = float32(faceCfg.Facing)
 	a.xshear = faceCfg.Xshear
-	a.angle = faceCfg.Angle
+	a.rot.angle = faceCfg.Angle
+	a.rot.xangle = faceCfg.XAngle
+	a.rot.yangle = faceCfg.YAngle
+	a.projection = int32(Projection_Orthographic) // Default
+	v := strings.ToLower(strings.TrimSpace(faceCfg.Projection))
+	switch v {
+	case "perspective":
+		a.projection = int32(Projection_Perspective)
+	case "perspective2":
+		a.projection = int32(Projection_Perspective2)
+	case "orthographic":
+		// default, we don't need to do nothing
+	default:
+		if i, err := strconv.Atoi(v); err == nil {
+			a.projection = int32(i)
+		}
+	}
+	a.fLength = faceCfg.Focallength
 	a.Update()
 
 	return a
@@ -4415,6 +4613,10 @@ type MotifHiscore struct {
 	mode        string
 	rows        []rankingRow
 	statsRaw    string
+	endTime     int32
+	noFade      bool
+	noBgs       bool
+	noOverlay   bool
 
 	// Active-row blink state (Rank / Result / Name)
 	rankActiveCount   int32
@@ -4461,6 +4663,10 @@ func (hi *MotifHiscore) reset(m *Motif) {
 	hi.counter = 0
 	hi.place = 0
 	hi.mode = ""
+	hi.endTime = 0
+	hi.noFade = false
+	hi.noBgs = false
+	hi.noOverlay = false
 	hi.rankActiveCount, hi.resultActiveCount, hi.nameActiveCount = 0, 0, 0
 	hi.rankUseActive2, hi.resultUseActive2, hi.nameUseActive2 = false, false, false
 	hi.rows = nil
@@ -4471,7 +4677,7 @@ func (hi *MotifHiscore) reset(m *Motif) {
 	hi.haveSaved = false
 }
 
-func (hi *MotifHiscore) init(m *Motif, mode string, place int32) {
+func (hi *MotifHiscore) init(m *Motif, mode string, place, endTime int32, noFade, noBgs, noOverlay bool) {
 	//if !m.HiscoreInfo.Enabled || !hi.enabled {
 	//	hi.initialized = true
 	//	return
@@ -4482,6 +4688,13 @@ func (hi *MotifHiscore) init(m *Motif, mode string, place int32) {
 	hi.reset(m)
 	hi.place = place
 	hi.mode = mode
+	hi.endTime = m.HiscoreInfo.Time
+	if endTime > 0 {
+		hi.endTime = endTime
+	}
+	hi.noFade = noFade
+	hi.noBgs = noBgs
+	hi.noOverlay = noOverlay
 	hi.input = (place > 0)
 	if hi.input {
 		// Start with one letter selected
@@ -4493,13 +4706,16 @@ func (hi *MotifHiscore) init(m *Motif, mode string, place int32) {
 	hi.timerFrames = m.HiscoreInfo.Timer.Framespercount
 
 	// Parse and cache rows (read from JSON file)
-	hi.rows = parseRankingRows("save/stats.json", mode)
+	hi.rows = parseRankingRows(sys.cmdFlags["-stats"], mode)
 
-	// Build portraits cache from cached rows (store on each row)
-	visible := int(m.HiscoreInfo.Window.VisibleItems)
-	if visible <= 0 || visible > len(hi.rows) {
-		visible = len(hi.rows)
+	// If a VisibleItems cap is configured, ignore any extra entries in stats.json.
+	capVisible := int(m.HiscoreInfo.Window.VisibleItems)
+	if capVisible > 0 && capVisible < len(hi.rows) {
+		hi.rows = hi.rows[:capVisible]
 	}
+
+	// Build portraits/text only for the rows we will actually show.
+	visible := len(hi.rows)
 
 	m.HiscoreInfo.Item.Face.AnimData.Reset()
 	m.HiscoreInfo.Item.Face.Bg.AnimData.Reset()
@@ -4616,7 +4832,7 @@ func (hi *MotifHiscore) init(m *Motif, mode string, place int32) {
 					fmtStr = fmt.Sprintf(fmtStr, row.win)
 				case "time":
 					// e.g. "%m'%s''%x"
-					fmtStr = FormatTimeText(fmtStr, row.time)
+					fmtStr = formatTimeText(fmtStr, row.time)
 				}
 				if m.HiscoreInfo.Item.Result.Uppercase {
 					fmtStr = strings.ToUpper(fmtStr)
@@ -4683,7 +4899,9 @@ func (hi *MotifHiscore) init(m *Motif, mode string, place int32) {
 	}
 
 	m.HiscoreBgDef.BGDef.Reset()
-	m.HiscoreInfo.FadeIn.FadeData.init(m.fadeIn, true)
+	if !hi.noFade {
+		m.HiscoreInfo.FadeIn.FadeData.init(m.fadeIn, true)
+	}
 
 	m.HiscoreInfo.Title.TextSpriteData.Reset()
 	m.HiscoreInfo.Title.TextSpriteData.AddPos(m.HiscoreInfo.Pos[0], m.HiscoreInfo.Pos[1])
@@ -4719,8 +4937,10 @@ func (hi *MotifHiscore) step(m *Motif) {
 		cancel := sys.esc || m.button(m.HiscoreInfo.Cancel.Key, -1) ||
 			(!hi.input && m.button(m.HiscoreInfo.Done.Key, -1)) ||
 			(!sys.gameRunning && sys.motif.AttractMode.Enabled && sys.credits > 0)
-		if cancel || (!hi.input && hi.counter == m.HiscoreInfo.Time) {
-			startFadeOut(m.HiscoreInfo.FadeOut.FadeData, m.fadeOut, cancel, m.fadePolicy)
+		if cancel || (!hi.input && hi.counter == hi.endTime) {
+			if !hi.noFade {
+				startFadeOut(m.HiscoreInfo.FadeOut.FadeData, m.fadeOut, cancel, m.fadePolicy)
+			}
 			hi.endTimer = hi.counter + m.fadeOut.timeRemaining
 		}
 	}
@@ -4768,7 +4988,7 @@ func (hi *MotifHiscore) step(m *Motif) {
 					m.Snd.play(m.HiscoreInfo.Done.Snd, 100, 0, 0, 0, 0)
 					hi.input = false
 					// Give a short tail
-					hi.counter = m.HiscoreInfo.Time - m.HiscoreInfo.Done.Time
+					hi.counter = hi.endTime - m.HiscoreInfo.Done.Time
 					hi.finalizeAndSave()
 				}
 			}
@@ -4826,7 +5046,7 @@ func (hi *MotifHiscore) step(m *Motif) {
 						// Finalize
 						m.Snd.play(m.HiscoreInfo.Done.Snd, 100, 0, 0, 0, 0)
 						hi.input = false
-						hi.counter = m.HiscoreInfo.Time - m.HiscoreInfo.Done.Time
+						hi.counter = hi.endTime - m.HiscoreInfo.Done.Time
 						hi.finalizeAndSave()
 					}
 				}
@@ -4836,7 +5056,7 @@ func (hi *MotifHiscore) step(m *Motif) {
 
 	// Finish after fade-out completes
 	if hi.endTimer != -1 && hi.counter >= hi.endTimer {
-		if m.fadeOut != nil {
+		if m.fadeOut != nil && !hi.noFade {
 			m.fadeOut.reset()
 		}
 		hi.reset(m)
@@ -4849,11 +5069,12 @@ func (hi *MotifHiscore) step(m *Motif) {
 
 func (hi *MotifHiscore) draw(m *Motif, layerno int16) {
 	// Background
-	if m.HiscoreBgDef.BgClearColor[0] >= 0 {
-		m.HiscoreBgDef.RectData.Draw(layerno)
+	if !hi.noBgs {
+		if m.HiscoreBgDef.BgClearColor[0] >= 0 {
+			m.HiscoreBgDef.RectData.Draw(layerno)
+		}
+		m.HiscoreBgDef.BGDef.Draw(int32(layerno), 0, 0, 1)
 	}
-	m.HiscoreBgDef.BGDef.Draw(int32(layerno), 0, 0, 1)
-
 	// Title and subtitles
 	m.HiscoreInfo.Title.TextSpriteData.Draw(layerno)
 	m.HiscoreInfo.Title.Rank.TextSpriteData.Draw(layerno)
@@ -4910,7 +5131,9 @@ func (hi *MotifHiscore) draw(m *Motif, layerno int16) {
 	}
 
 	// Overlay
-	m.HiscoreInfo.Overlay.RectData.Draw(layerno)
+	if !hi.noOverlay {
+		m.HiscoreInfo.Overlay.RectData.Draw(layerno)
+	}
 }
 
 func (hi *MotifHiscore) finalizeAndSave() {
@@ -4927,7 +5150,7 @@ func (hi *MotifHiscore) finalizeAndSave() {
 		hi.haveSaved = true
 		return
 	}
-	data, err := os.ReadFile("save/stats.json")
+	data, err := os.ReadFile(sys.cmdFlags["-stats"])
 	if err != nil {
 		fmt.Println("hiscore: cannot read save/stats.json for name save:", err)
 		hi.haveSaved = true
@@ -4940,14 +5163,7 @@ func (hi *MotifHiscore) finalizeAndSave() {
 		hi.haveSaved = true
 		return
 	}
-	// Pretty-print the JSON
-	var buf bytes.Buffer
-	if err := json.Indent(&buf, out, "", "  "); err == nil {
-		out = buf.Bytes()
-	} else {
-		fmt.Println("hiscore: pretty print failed, writing compact JSON:", err)
-	}
-	if err := os.WriteFile("save/stats.json", out, 0644); err != nil {
+	if err := writeStatsPretty(sys.cmdFlags["-stats"], out); err != nil {
 		fmt.Println("hiscore: write save/stats.json failed:", err)
 	}
 	hi.haveSaved = true
@@ -5353,7 +5569,7 @@ func (vi *MotifVictory) buildSideOrder(side int, allowKO bool, maxNum int) []vic
 }
 
 // applyEntry fills one PlayerVictoryProperties slot from a victoryEntry.
-func (vi *MotifVictory) applyEntry(m *Motif, dst *PlayerVictoryProperties, e victoryEntry, slotName string) {
+func (vi *MotifVictory) applyEntry(m *Motif, dst *PlayerVictoryProperties, e victoryEntry, slotName string, isLoser bool) {
 	// Name
 	if e.c != nil {
 		dst.Name.TextSpriteData.text = e.c.gi().displayname
@@ -5370,29 +5586,53 @@ func (vi *MotifVictory) applyEntry(m *Motif, dst *PlayerVictoryProperties, e vic
 	//fmt.Printf("[Victory] applyEntry slot=%s side=%d memberNo=%d cn=%d pal=%d loaded=%v name=%q\n", slotName, e.side, e.memberNo, e.cn, e.pal, e.c != nil, dst.Name.TextSpriteData.text)
 	// Resolve SelectChar (for portraits)
 	sc := sys.sel.GetChar(e.cn)
+
+	// Default win portraits
+	targetSpr := dst.Spr
+	targetAnim := dst.Anim
+	targetFace2Spr := dst.Face2.Spr
+	targetFace2Anim := dst.Face2.Anim
+
+	if isLoser {
+		if dst.Lose.Spr[0] != -1 {
+			targetSpr = dst.Lose.Spr
+		}
+		if dst.Lose.Anim != -1 {
+			targetAnim = dst.Lose.Anim
+		}
+		if dst.Face2.Lose.Spr[0] != -1 {
+			targetFace2Spr = dst.Face2.Lose.Spr
+		}
+		if dst.Face2.Lose.Anim != -1 {
+			targetFace2Anim = dst.Face2.Lose.Anim
+		}
+	}
+
 	// Main face
 	mainX := dst.Pos[0] + dst.Offset[0]
 	mainY := dst.Pos[1] + dst.Offset[1]
 	dst.AnimData = victoryPortraitAnim(
 		m, sc, slotName+".main",
-		dst.Anim, dst.Spr,
+		targetAnim, targetSpr,
 		dst.Localcoord, dst.Layerno, dst.Facing,
-		dst.Scale, dst.Window,
-		mainX, mainY,
-		dst.ApplyPal || e.c == nil, // loaded chars already have their runtime pal; for un-loaded we must apply
-		e.pal, e.c,
+		dst.Scale, dst.Xshear, dst.Angle, dst.XAngle,
+		dst.YAngle, dst.Projection, dst.Focallength,
+		dst.Window, mainX, mainY,
+		dst.ApplyPal || e.c == nil,
+		e.pal, dst.Lose.Darken, e.c,
 	)
 	// Face2
 	face2X := dst.Pos[0] + dst.Face2.Offset[0]
 	face2Y := dst.Pos[1] + dst.Face2.Offset[1]
 	dst.Face2.AnimData = victoryPortraitAnim(
 		m, sc, slotName+".face2",
-		dst.Face2.Anim, dst.Face2.Spr,
+		targetFace2Anim, targetFace2Spr,
 		dst.Face2.Localcoord, dst.Face2.Layerno, dst.Face2.Facing,
-		dst.Face2.Scale, dst.Face2.Window,
-		face2X, face2Y,
+		dst.Face2.Scale, dst.Face2.Xshear, dst.Face2.Angle, dst.Face2.XAngle,
+		dst.Face2.YAngle, dst.Face2.Projection, dst.Face2.Focallength,
+		dst.Face2.Window, face2X, face2Y,
 		dst.Face2.ApplyPal || e.c == nil,
-		e.pal, e.c,
+		e.pal, dst.Face2.Lose.Darken, e.c,
 	)
 	if dst.AnimData == nil && dst.Face2.AnimData == nil {
 		//fmt.Printf("[Victory] slot=%s -> WARNING: both main and face2 animations are nil\n", slotName)
@@ -5402,7 +5642,7 @@ func (vi *MotifVictory) applyEntry(m *Motif, dst *PlayerVictoryProperties, e vic
 func (vi *MotifVictory) init(m *Motif) {
 	if !m.VictoryScreen.Enabled || !vi.enabled || sys.winnerTeam() < 1 || (sys.winnerTeam() == 2 && !m.VictoryScreen.Cpu.Enabled) ||
 		((sys.gameMode == "versus" || sys.gameMode == "netplayversus") && !m.VictoryScreen.Vs.Enabled) ||
-		!sys.sel.launchFightParams.VictoryScreen {
+		!sys.sel.gameParams.VictoryScreen {
 		vi.initialized = true
 		return
 	}
@@ -5435,11 +5675,14 @@ func (vi *MotifVictory) init(m *Motif) {
 	lSlots := []*PlayerVictoryProperties{&m.VictoryScreen.P2, &m.VictoryScreen.P4, &m.VictoryScreen.P6, &m.VictoryScreen.P8}
 	wNames := []string{"P1", "P3", "P5", "P7"}
 	lNames := []string{"P2", "P4", "P6", "P8"}
+	if m.VictoryScreen.KeepSide.Enabled && sys.winnerTeam() == 2 {
+		wSlots, lSlots = lSlots, wSlots
+	}
 	for i := 0; i < len(wEntries) && i < len(wSlots); i++ {
-		vi.applyEntry(m, wSlots[i], wEntries[i], wNames[i])
+		vi.applyEntry(m, wSlots[i], wEntries[i], wNames[i], false)
 	}
 	for i := 0; i < len(lEntries) && i < len(lSlots); i++ {
-		vi.applyEntry(m, lSlots[i], lEntries[i], lNames[i])
+		vi.applyEntry(m, lSlots[i], lEntries[i], lNames[i], true)
 	}
 
 	var leader *Char
@@ -5447,6 +5690,12 @@ func (vi *MotifVictory) init(m *Motif) {
 		leader = wEntries[0].c
 	}
 	vi.text = vi.getVictoryQuote(m, leader)
+
+	m.VictoryScreen.WinName.TextSpriteData.text = ""
+	if leader != nil {
+		// Displays only the winner’s name regardless of team side or player number
+		m.VictoryScreen.WinName.TextSpriteData.text = leader.gi().displayname
+	}
 	m.VictoryBgDef.BGDef.Reset()
 
 	//fmt.Printf("[Victory] init done. Winners=%d entries, Losers=%d entries. WinQuote=%q\n", len(wEntries), len(lEntries), vi.text)
@@ -5558,6 +5807,28 @@ func (vi *MotifVictory) step(m *Motif) {
 }
 
 func (vi *MotifVictory) draw(m *Motif, layerno int16) {
+	// Order victory slots by draworder (int). Higher = drawn later (on top).
+	type slotRef struct {
+		idx   int
+		p     *PlayerVictoryProperties
+		order int32
+	}
+	slots := []slotRef{
+		{0, &m.VictoryScreen.P1, m.VictoryScreen.P1.DrawOrder},
+		{1, &m.VictoryScreen.P2, m.VictoryScreen.P2.DrawOrder},
+		{2, &m.VictoryScreen.P3, m.VictoryScreen.P3.DrawOrder},
+		{3, &m.VictoryScreen.P4, m.VictoryScreen.P4.DrawOrder},
+		{4, &m.VictoryScreen.P5, m.VictoryScreen.P5.DrawOrder},
+		{5, &m.VictoryScreen.P6, m.VictoryScreen.P6.DrawOrder},
+		{6, &m.VictoryScreen.P7, m.VictoryScreen.P7.DrawOrder},
+		{7, &m.VictoryScreen.P8, m.VictoryScreen.P8.DrawOrder},
+	}
+	sort.SliceStable(slots, func(i, j int) bool {
+		if slots[i].order == slots[j].order {
+			return slots[i].idx < slots[j].idx
+		}
+		return slots[i].order < slots[j].order
+	})
 	// Overlay
 	m.VictoryScreen.Overlay.RectData.Draw(layerno)
 
@@ -5568,24 +5839,14 @@ func (vi *MotifVictory) draw(m *Motif, layerno int16) {
 	m.VictoryBgDef.BGDef.Draw(int32(layerno), 0, 0, 1)
 
 	// Face2 portraits
-	m.VictoryScreen.P1.Face2.AnimData.Draw(layerno)
-	m.VictoryScreen.P2.Face2.AnimData.Draw(layerno)
-	m.VictoryScreen.P3.Face2.AnimData.Draw(layerno)
-	m.VictoryScreen.P4.Face2.AnimData.Draw(layerno)
-	m.VictoryScreen.P5.Face2.AnimData.Draw(layerno)
-	m.VictoryScreen.P6.Face2.AnimData.Draw(layerno)
-	m.VictoryScreen.P7.Face2.AnimData.Draw(layerno)
-	m.VictoryScreen.P8.Face2.AnimData.Draw(layerno)
+	for _, s := range slots {
+		s.p.Face2.AnimData.Draw(layerno)
+	}
 
 	// Face portraits
-	m.VictoryScreen.P1.AnimData.Draw(layerno)
-	m.VictoryScreen.P2.AnimData.Draw(layerno)
-	m.VictoryScreen.P3.AnimData.Draw(layerno)
-	m.VictoryScreen.P4.AnimData.Draw(layerno)
-	m.VictoryScreen.P5.AnimData.Draw(layerno)
-	m.VictoryScreen.P6.AnimData.Draw(layerno)
-	m.VictoryScreen.P7.AnimData.Draw(layerno)
-	m.VictoryScreen.P8.AnimData.Draw(layerno)
+	for _, s := range slots {
+		s.p.AnimData.Draw(layerno)
+	}
 
 	// Name
 	m.VictoryScreen.P1.Name.TextSpriteData.Draw(layerno)
@@ -5596,7 +5857,12 @@ func (vi *MotifVictory) draw(m *Motif, layerno int16) {
 	m.VictoryScreen.P6.Name.TextSpriteData.Draw(layerno)
 	m.VictoryScreen.P7.Name.TextSpriteData.Draw(layerno)
 	m.VictoryScreen.P8.Name.TextSpriteData.Draw(layerno)
+	//for _, s := range slots {
+	//	s.p.Name.TextSpriteData.Draw(layerno)
+	//}
 
+	// Winner Name
+	m.VictoryScreen.WinName.TextSpriteData.Draw(layerno)
 	// Winquote
 	m.VictoryScreen.WinQuote.TextSpriteData.Draw(layerno)
 }
@@ -5642,8 +5908,9 @@ func tryGetPortrait(sc *SelectChar, ownerC *Char, pairs [][2]int32) (anim *Anima
 func victoryPortraitAnim(m *Motif, sc *SelectChar, slot string,
 	animNo int32, spr [2]int32,
 	localcoord [2]int32, layerno int16, facing int32,
-	scale [2]float32, window [4]int32,
-	x, y float32, applyPal bool, pal int, ownerC *Char) *Anim {
+	scale [2]float32, xshear float32, angle float32, xangle float32,
+	yangle float32, projection string, fLength float32, window [4]int32,
+	x, y float32, applyPal bool, pal int, darken int32, ownerC *Char) *Anim {
 
 	//fmt.Printf("[Victory] buildPortrait slot=%s scNil=%v animNo=%d spr=(%d,%d) pos=(%.1f,%.1f) scale=(%.3f,%.3f) localcoord=(%d,%d) window=(%d,%d,%d,%d) applyPal=%v pal=%d\n", slot, sc == nil, animNo, spr[0], spr[1], x, y, scale[0], scale[1], localcoord[0], localcoord[1], window[0], window[1], window[2], window[3], applyPal, pal)
 
@@ -5710,13 +5977,53 @@ func victoryPortraitAnim(m *Motif, sc *SelectChar, slot string,
 	if sx == 0 || sy == 0 {
 		//fmt.Printf("[Victory] slot=%s -> WARNING: zero scale sx=%.4f sy=%.4f (check portraitscale/localcoord)\n", slot, sx, sy)
 	}
+	// Transformations
+	a.xshear = xshear
+	a.rot.angle = angle
+	a.rot.xangle = xangle
+	a.rot.yangle = yangle
+	a.projection = int32(Projection_Orthographic) // Default
+	v := strings.ToLower(strings.TrimSpace(projection))
+	switch v {
+	case "perspective":
+		a.projection = int32(Projection_Perspective)
+	case "perspective2":
+		a.projection = int32(Projection_Perspective2)
+	case "orthographic":
+		// default, we don't need to do nothing
+	default:
+		if i, err := strconv.Atoi(v); err == nil {
+			a.projection = int32(i)
+		}
+	}
+	a.fLength = fLength
 	// Palette for non-loaded (or force-apply if requested)
+	isCopied := false
 	if applyPal && pal > 0 && a.anim != nil && a.anim.sff != nil {
 		if len(a.anim.sff.palList.paletteMap) > 0 {
+			a = a.Copy()
+			isCopied = true
 			a.anim.sff.palList.paletteMap[0] = pal - 1
 		}
 		//fmt.Printf("[Victory] slot=%s -> applied palette %d\n", slot, pal)
 	}
+
+	if darken > 0 && darken < 256 && a.anim != nil && a.anim.sff != nil {
+		if !isCopied {
+			a = a.Copy()
+			isCopied = true
+		}
+		val := 256 - darken
+		if val < 0 {
+			val = 0
+		}
+		if val > 256 {
+			val = 256
+		}
+		a.palfx.time = -1
+		a.palfx.mul = [3]int32{val, val, val}
+	}
+
 	return a
 }
 
@@ -5747,76 +6054,6 @@ type MotifWin struct {
 	resultsKey    string
 }
 
-// results helpers
-func normalizeModeKey(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	// unify common separators; keep only [a-z0-9]
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func stripSuffixAndTrimSep(s, suffix string) (string, bool) {
-	sl := strings.ToLower(s)
-	suffix = strings.ToLower(suffix)
-	if !strings.HasSuffix(sl, suffix) {
-		return "", false
-	}
-	prefix := s[:len(s)-len(suffix)]
-	prefix = strings.TrimRight(prefix, "._- ")
-	prefix = strings.TrimRight(prefix, "_")
-	return prefix, true
-}
-
-func (wi *MotifWin) findResultsScreenForMode(m *Motif, mode string) (*ResultsScreenProperties, string) {
-	if m == nil || len(m.ResultsScreen) == 0 {
-		return nil, ""
-	}
-	nm := normalizeModeKey(mode)
-	for k, v := range m.ResultsScreen {
-		if v == nil {
-			continue
-		}
-		// keys are stored lowercased by assignToPatternMap, but don't assume
-		prefix, ok := stripSuffixAndTrimSep(k, "results_screen")
-		if !ok {
-			prefix, ok = stripSuffixAndTrimSep(k, "results.screen")
-		}
-		if !ok {
-			continue
-		}
-		if normalizeModeKey(prefix) == nm {
-			return v, strings.ToLower(k)
-		}
-	}
-	return nil, ""
-}
-
-func (wi *MotifWin) findResultsBgDefForMode(m *Motif, mode string) (*BgDefProperties, string) {
-	if m == nil || len(m.ResultsBgDef) == 0 {
-		return nil, ""
-	}
-	nm := normalizeModeKey(mode)
-	for k, v := range m.ResultsBgDef {
-		if v == nil {
-			continue
-		}
-		prefix, ok := stripSuffixAndTrimSep(k, "resultsbgdef")
-		if !ok {
-			continue
-		}
-		if normalizeModeKey(prefix) == nm {
-			return v, strings.ToLower(k)
-		}
-	}
-	return nil, ""
-}
-
 // Assign state data to MotifWin
 func (wi *MotifWin) assignStates(p1, p1Teammate, p2, p2Teammate []int32) {
 	wi.p1State = p1
@@ -5841,11 +6078,20 @@ func (wi *MotifWin) reset(m *Motif) {
 func (wi *MotifWin) init(m *Motif) {
 	if (wi.winEnabled && sys.winnerTeam() != 0 && sys.winnerTeam() != int32(sys.home)+1) ||
 		(wi.loseEnabled && (sys.winnerTeam() == 0 || sys.winnerTeam() == int32(sys.home)+1)) {
-		if ok := wi.initResults(m); ok {
-		} else if ok := wi.initWinScreen(m); ok {
-		} else {
-			wi.initialized = true
-			return
+		// Variant selection: [Win Screen] results.<gamemode> = <section name>
+		// If not defined, fall back to standard Win Screen.
+		variant := strings.TrimSpace(m.WinScreen.Results[sys.gameMode])
+		if variant == "" || strings.EqualFold(variant, "win screen") {
+			if !wi.initWinScreen(m) {
+				wi.initialized = true
+				return
+			}
+		} else if !wi.initResultsVariant(m, variant) {
+			// If the configured variant doesn't exist/disabled, fall back to Win Screen.
+			if !wi.initWinScreen(m) {
+				wi.initialized = true
+				return
+			}
 		}
 	} else {
 		wi.initialized = true
@@ -5866,49 +6112,92 @@ func (wi *MotifWin) init(m *Motif) {
 	wi.initialized = true
 }
 
-func (wi *MotifWin) initResults(m *Motif) bool {
-	// Locate "<mode>_results_screen" and "<mode>resultsbgdef" (any mode, not hardcoded fields).
-	rs, rsKey := wi.findResultsScreenForMode(m, sys.gameMode)
+func (wi *MotifWin) initResultsVariant(m *Motif, sectionName string) bool {
+	// sectionName is something like "X Results Screen".
+	// Parsed section keys are lowercased, and spaces become underscores in the map key.
+	name := strings.TrimSpace(sectionName)
+	if m == nil || name == "" || len(m.ResultsScreen) == 0 {
+		return false
+	}
+
+	rsKey := strings.ToLower(strings.ReplaceAll(name, " ", "_"))
+	rs := m.ResultsScreen[rsKey]
 	if rs == nil || !rs.Enabled {
 		return false
 	}
-	bg, bgKey := wi.findResultsBgDefForMode(m, sys.gameMode)
 
-	// BgDef is optional-ish: allow results screen to run even if BGDef is missing,
-	// but drawing will naturally skip the BG.
+	// BgDef key: "<base>resultsbgdef" where base is section name without " Results Screen".
+	base := strings.ToLower(name)
+	if strings.HasSuffix(base, " results screen") {
+		base = strings.TrimSuffix(base, " results screen")
+	}
+	base = strings.TrimSpace(base)
+	base = strings.ReplaceAll(base, " ", "")
+	bgKey := base + "resultsbgdef"
+	bg := m.ResultsBgDef[bgKey]
+
 	if bg != nil && bg.BGDef != nil {
 		bg.BGDef.Reset()
 	}
 
-	// Remember current active results pointers for draw().
 	wi.resultsScreen = rs
 	wi.resultsBgDef = bg
 	wi.resultsKey = rsKey
-	if wi.resultsKey == "" {
-		wi.resultsKey = bgKey
-	}
 
-	// Wins text formatting:
-	// - "rounds-based" modes: when roundsToWin is set, mimic old survival behavior.
-	// - "timeattack": keep existing time formatting (selected by mode key, not by hardcoded struct fields).
-	modeNorm := normalizeModeKey(sys.gameMode)
-	switch {
-	case rs.RoundsToWin > 0 || strings.Contains(modeNorm, "survival"):
+	// Formatting type comes from [Hiscore Info] ranking.<gamemode> = score|time|win
+	dataType := strings.ToLower(strings.TrimSpace(m.HiscoreInfo.Ranking[sys.gameMode]))
+
+	// Unified win/lose selection: win anims only if we would get a hiscore entry (name input).
+	wouldPlace := rankingWouldPlace(sys.gameMode)
+
+	switch dataType {
+	case "win":
 		if rs.WinsText.TextSpriteData != nil {
-			rs.WinsText.TextSpriteData.text = fmt.Sprintf(m.replaceFormatSpecifiers(rs.WinsText.Text), sys.match-1)
+			tal := tallyRun()
+			rs.WinsText.TextSpriteData.text = m.sprintf(rs.WinsText.Text, tal.winP1, tal.loseP1)
 		}
-		if rs.RoundsToWin > 0 && sys.match >= rs.RoundsToWin {
+		if wouldPlace && rs.RoundsToWin > 0 && sys.match >= rs.RoundsToWin {
 			wi.assignStates(rs.P1.Win.State, rs.P1.Teammate.Win.State, rs.P2.Win.State, rs.P2.Teammate.Win.State)
 		} else {
 			wi.assignStates(rs.P1.State, rs.P1.Teammate.State, rs.P2.State, rs.P2.Teammate.State)
 		}
-	case strings.Contains(modeNorm, "time"):
+	case "time":
 		if rs.WinsText.TextSpriteData != nil {
-			rs.WinsText.TextSpriteData.text = FormatTimeText(rs.WinsText.Text, float64(sys.timeTotal())/60)
+			rs.WinsText.TextSpriteData.text = formatTimeText(rs.WinsText.Text, float64(sys.timeTotal())/60)
 		}
-		wi.assignStates(rs.P1.State, rs.P1.Teammate.State, rs.P2.State, rs.P2.Teammate.State)
+		if wouldPlace {
+			wi.assignStates(
+				rs.P1.Win.State, rs.P1.Teammate.Win.State,
+				rs.P2.Win.State, rs.P2.Teammate.Win.State,
+			)
+		} else {
+			wi.assignStates(rs.P1.State, rs.P1.Teammate.State, rs.P2.State, rs.P2.Teammate.State)
+		}
+	case "score":
+		if rs.WinsText.TextSpriteData != nil {
+			fs := m.replaceFormatSpecifiers(rs.WinsText.Text)
+			// Total score for P1 side:
+			sc := int32(0)
+			if len(sys.scoreStart) > 0 {
+				sc = int32(sys.scoreStart[0])
+			}
+			for _, v := range sys.scoreRounds {
+				if len(v) > 0 {
+					sc += int32(v[0])
+				}
+			}
+			rs.WinsText.TextSpriteData.text = fmt.Sprintf(fs, sc)
+		}
+		if wouldPlace {
+			wi.assignStates(
+				rs.P1.Win.State, rs.P1.Teammate.Win.State,
+				rs.P2.Win.State, rs.P2.Teammate.Win.State,
+			)
+		} else {
+			wi.assignStates(rs.P1.State, rs.P1.Teammate.State, rs.P2.State, rs.P2.Teammate.State)
+		}
 	default:
-		// Generic: no assumptions about what the text represents.
+		// dataType == "" (or unknown): no formatting fallback.
 		if rs.WinsText.TextSpriteData != nil {
 			rs.WinsText.TextSpriteData.text = rs.WinsText.Text
 		}
@@ -5964,7 +6253,7 @@ func (wi *MotifWin) step(m *Motif) {
 
 	// Handle state transitions
 	if !wi.stateDone && wi.counter >= wi.stateTime {
-		m.processStateTransitions(wi.p1State, wi.p1TeammateState, wi.p2State, wi.p2TeammateState)
+		m.processStateTransitionsBySide(wi.p1State, wi.p1TeammateState, wi.p2State, wi.p2TeammateState)
 		wi.stateDone = true
 	}
 

@@ -779,6 +779,7 @@ type Renderer_VK struct {
 	minUniformBufferOffsetAlignment uint32
 	maxImageArrayLayers             uint32
 	memoryTypeMap                   map[vk.MemoryPropertyFlagBits]uint32
+	allocatedImageMemory            uint64
 
 	VKState
 }
@@ -4698,6 +4699,7 @@ func (r *Renderer_VK) CreatePipelineCache() error {
 // Render initialization.
 // Creates the default shaders, the framebuffer and enables MSAA.
 func (r *Renderer_VK) Init() {
+	r.allocatedImageMemory = 0
 	r.enableModel = sys.cfg.Video.EnableModel
 	r.enableShadow = sys.cfg.Video.EnableModelShadow
 	r.memoryTypeMap = make(map[vk.MemoryPropertyFlagBits]uint32)
@@ -7630,6 +7632,7 @@ func (r *Renderer_VK) AllocateImageMemory(img vk.Image, memoryProperty vk.Memory
 		memoryTypeIndex, _ = vk.FindMemoryTypeIndex(r.gpuDevices[r.gpuIndex], memReq.MemoryTypeBits, memoryProperty)
 		r.memoryTypeMap[memoryProperty] = memoryTypeIndex
 	}
+	r.allocatedImageMemory += uint64(memReq.Size)
 	allocInfo := vk.MemoryAllocateInfo{
 		SType:           vk.StructureTypeMemoryAllocateInfo,
 		AllocationSize:  memReq.Size,

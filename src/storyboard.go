@@ -22,6 +22,10 @@ type LayerProperties struct {
 	Scale          [2]float32 `ini:"scale" default:"1,1"`
 	Xshear         float32    `ini:"xshear"`
 	Angle          float32    `ini:"angle"`
+	XAngle         float32    `ini:"xangle"`
+	YAngle         float32    `ini:"yangle"`
+	Projection     string     `ini:"projection"`
+	Focallength    float32    `ini:"focallength" default:"2048"`
 	Layerno        int16      `ini:"layerno" default:"2"`
 	Window         [4]int32   `ini:"window"`
 	Localcoord     [2]int32   `ini:"localcoord"`
@@ -300,7 +304,7 @@ func (s *Storyboard) loadFiles() {
 	LoadFile(&s.SceneDef.Spr, []string{s.SceneDef.Spr}, func(filename string) error {
 		if filename != "" {
 			var err error
-			s.Sff, err = loadSff(filename, false)
+			s.Sff, err = loadSff(filename, false, true)
 			if err != nil {
 				sys.errLog.Printf("Failed to load %v: %v", filename, err)
 			}
@@ -426,8 +430,15 @@ func (s *Storyboard) reset() {
 			if layerProps.AnimData != nil {
 				layerProps.AnimData.Reset()
 				layerProps.AnimData.AddPos(sceneProps.Layerall.Pos[0], sceneProps.Layerall.Pos[1])
-				layerProps.AnimData.palfx = layerProps.PalFx.PalFxData
-				if layerProps.AnimData.palfx != nil {
+				// Don't alias PalFX pointers between Anim/Text: they have independent runtime state.
+				// Copy layer PalFX settings into the anim's own instance, then reset runtime state.
+				if layerProps.PalFx.PalFxData != nil {
+					if layerProps.AnimData.palfx == nil {
+						layerProps.AnimData.palfx = newPalFX()
+					}
+					*layerProps.AnimData.palfx = *layerProps.PalFx.PalFxData
+					layerProps.AnimData.palfx.clear()
+				} else if layerProps.AnimData.palfx != nil {
 					layerProps.AnimData.palfx.clear()
 				}
 				layerProps.AnimData.Update()
@@ -444,6 +455,8 @@ func (s *Storyboard) reset() {
 						layerProps.TextSpriteData.palfx.clear()
 					}
 				}
+				// Re-apply font tuple RGBA after reset.
+				layerProps.TextSpriteData.SetColor(layerProps.Font[3], layerProps.Font[4], layerProps.Font[5], layerProps.Font[6])
 			}
 			// Reset per-layer typing state
 			layerProps.typedLen = 0

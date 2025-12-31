@@ -1230,7 +1230,7 @@ func (s *Sprite) CachePalette(pal []uint32) Texture {
 	return s.PalTex
 }
 
-func (s *Sprite) Draw(x, y, xscale, yscale float32, rxadd float32, rot Rotation, fx *PalFX, window *[4]int32) {
+func (s *Sprite) Draw(x, y, xscale, yscale float32, rxadd float32, rot Rotation, projectionMode int32, fLength float32, fx *PalFX, window *[4]int32) {
 	x += float32(sys.gameWidth-320)/2 - xscale*float32(s.Offset[0])
 	y += float32(sys.gameHeight-240) - yscale*float32(s.Offset[1])
 	var rcx, rcy float32
@@ -1271,8 +1271,8 @@ func (s *Sprite) Draw(x, y, xscale, yscale float32, rxadd float32, rot Rotation,
 		window:         window,
 		rcx:            rcx,
 		rcy:            rcy,
-		projectionMode: 0,
-		fLength:        0,
+		projectionMode: projectionMode,
+		fLength:        fLength,
 		xOffset:        -xscale * float32(s.Offset[0]),
 		yOffset:        -yscale * float32(s.Offset[1]),
 	}
@@ -1322,7 +1322,7 @@ func removeSFFCache(filename string) {
 	}
 }
 
-func loadSff(filename string, char bool) (*Sff, error) {
+func loadSff(filename string, char bool, isMainThread bool) (*Sff, error) {
 	// If this SFF is already in the cache, just return a copy
 	if cached, ok := SffCache[filename]; ok {
 		cached.refCount++
@@ -1453,6 +1453,9 @@ func loadSff(filename string, char bool) (*Sff, error) {
 			shofs = int64(xofs)
 		} else {
 			shofs += 28
+		}
+		if isMainThread {
+			sys.runMainThreadTask()
 		}
 	}
 	SffCache[filename] = &SffCacheEntry{*s, 1}

@@ -247,40 +247,39 @@ type System struct {
 	credits                 int32
 	gameRunning             bool
 
-	msaa              int32
-	externalShaders   [][][]byte
-	windowMainIcon    []image.Image
-	gameMode          string
-	frameCounter      int32
-	preMatchTime      int32
-	captureNum        int
-	decisiveRound     [2]bool
-	timerStart        int32
-	timerRounds       []int32
-	curPlayTime       int32
-	scoreStart        [2]float32
-	scoreRounds       [][2]float32
-	statsLog          StatsLog
-	consecutiveWins   [2]int32
-	consecutiveRounds bool
-	firstAttack       [3]int
-	teamLeader        [2]int
-	maxPowerMode      bool
-	clsnText          []ClsnText
-	consoleText       []string
-	luaLState         *lua.LState
-	statusLFunc       *lua.LFunction
-	listLFunc         []*lua.LFunction
-	introSkipCall     bool
-	endMatch          bool
-	continueFlg       bool
-	dialogueForce     int
-	dialogueBarsFlg   bool
-	noSoundFlg        bool
-	postMatchFlg      bool
-	playBgmFlg        bool
-	loopBreak         bool
-	loopContinue      bool
+	msaa            int32
+	externalShaders [][][]byte
+	windowMainIcon  []image.Image
+	gameMode        string
+	frameCounter    int32
+	preMatchTime    int32
+	captureNum      int
+	decisiveRound   [2]bool
+	timerStart      int32
+	timerRounds     []int32
+	curPlayTime     int32
+	scoreStart      [2]float32
+	scoreRounds     [][2]float32
+	statsLog        StatsLog
+	consecutiveWins [2]int32
+	firstAttack     [3]int
+	teamLeader      [2]int
+	maxPowerMode    bool
+	clsnText        []ClsnText
+	consoleText     []string
+	luaLState       *lua.LState
+	statusLFunc     *lua.LFunction
+	listLFunc       []*lua.LFunction
+	introSkipCall   bool
+	endMatch        bool
+	continueFlg     bool
+	dialogueForce   int
+	dialogueBarsFlg bool
+	noSoundFlg      bool
+	postMatchFlg    bool
+	playBgmFlg      bool
+	loopBreak       bool
+	loopContinue    bool
 
 	statePool       GameStatePool
 	luaStringVars   map[string]string
@@ -1850,6 +1849,11 @@ func (s *System) resetRoundState() {
 		}
 		p[0].selfState(5900, firstAnim, -1, 0, "")
 	}
+
+	// Backup must reflect the post-swap roundXdef stage, or F4 restores the prior round's stage.
+	if s.stage != nil {
+		s.roundBackup.Save()
+	}
 }
 
 func (s *System) resetRound() {
@@ -2373,7 +2377,9 @@ func (s *System) stepRoundState() {
 			s.intro = Min(s.intro, fadeoutStart)
 			s.winskipped = true
 		}
-		if s.intro == fadeoutStart && !s.gsf(GSF_roundnotover) && !s.motif.di.active && !s.lifebar.ro.fadeOut.isActive() {
+		// If the user skipped winposes, don't let RoundNotOver swallow the single fadeoutStart tick.
+		if s.intro == fadeoutStart && (!s.gsf(GSF_roundnotover) || s.winskipped) &&
+			!s.motif.di.active && !s.lifebar.ro.fadeOut.isActive() {
 			s.lifebar.ro.fadeOut.init(s.lifebar.ro.fadeOut, false)
 		}
 
@@ -2778,7 +2784,7 @@ func (s *System) drawDebugText() {
 			}
 			*y += float32(s.debugFont.fnt.Size[1]) * s.debugFont.yscl / s.heightScale
 			s.debugFont.fnt.Print(drawTxt, *x, *y, s.debugFont.xscl/s.widthScale,
-				s.debugFont.yscl/s.heightScale, 0, Rotation{0, 0, 0}, 0, 1, &s.scrrect,
+				s.debugFont.yscl/s.heightScale, 0, Rotation{0, 0, 0}, 0, 0, 0, 1, &s.scrrect,
 				s.debugFont.palfx, s.debugFont.frgba)
 		}
 	}
@@ -2855,7 +2861,7 @@ func (s *System) drawDebugText() {
 	for _, t := range s.clsnText {
 		s.debugFont.SetColor(t.r, t.g, t.b, t.a)
 		s.debugFont.fnt.Print(t.text, t.x, t.y, s.debugFont.xscl/s.widthScale,
-			s.debugFont.yscl/s.heightScale, 0, Rotation{0, 0, 0}, 0, 0, &s.scrrect,
+			s.debugFont.yscl/s.heightScale, 0, Rotation{0, 0, 0}, 0, 0, 0, 0, &s.scrrect,
 			s.debugFont.palfx, s.debugFont.frgba)
 	}
 	//}
@@ -3123,7 +3129,7 @@ func (s *System) SetupCharRoundStart() {
 						p[0].power = p[0].powerMax
 					} else if p[0].ocd().power != -1 {
 						p[0].power = Clamp(p[0].ocd().power, 0, p[0].powerMax)
-					} else if !sys.consecutiveRounds || sys.consecutiveWins[0] == 0 {
+					} else if !sys.sel.gameParams.PersistRounds || sys.consecutiveWins[0] == 0 {
 						p[0].power = 0
 					}
 				}
@@ -3446,7 +3452,7 @@ type Select struct {
 	cdefOverwrite      map[int]string
 	sdefOverwrite      string
 	music              Music
-	launchFightParams  *LaunchFightParams
+	gameParams         *GameParams
 }
 
 func newSelect() *Select {
@@ -3459,7 +3465,7 @@ func newSelect() *Select {
 		stageSpritePreload: make(map[[2]uint16]bool),
 		cdefOverwrite:      make(map[int]string),
 		music:              make(Music),
-		launchFightParams:  newLaunchFightParams(),
+		gameParams:         newGameParams(),
 	}
 }
 
@@ -4103,11 +4109,11 @@ func (s *Select) AddSelectedChar(tn, cn, pl int) bool {
 	}
 	sys.loadMutex.Lock()
 	s.selected[tn] = append(s.selected[tn], [...]int{n, pl})
-	if s.launchFightParams == nil {
-		s.launchFightParams = newLaunchFightParams()
+	if s.gameParams == nil {
+		s.gameParams = newGameParams()
 	}
 	// ensure per-member override slot exists (needed for existed flag / persistence)
-	_ = s.launchFightParams.ensureOverride(tn, len(s.selected[tn])-1)
+	_ = s.gameParams.ensureOverride(tn, len(s.selected[tn])-1)
 	sys.loadMutex.Unlock()
 	return true
 }
@@ -4118,7 +4124,7 @@ func (s *Select) ClearSelected() {
 	sys.loadMutex.Unlock()
 	s.selectedStageNo = -1
 	s.music = make(Music)
-	s.launchFightParams = newLaunchFightParams()
+	s.gameParams = newGameParams()
 }
 
 type LoaderState int32

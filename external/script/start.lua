@@ -288,7 +288,7 @@ end
 function start.f_setRounds(roundTime, t_rounds)
 	-- disable winscreen if another match exists
 	local winscreen = main.motif.winscreen
-	if winscreen and (not main.makeRoster or start.t_roster[matchno() + 1] ~= nil) then
+	if winscreen and main.makeRoster and start.t_roster[matchno() + 1] ~= nil then
 		main.motif.winscreen = false
 	end
 	setMotifElements(main.motif)
@@ -757,6 +757,10 @@ function start.f_animGet(ref, side, member, paramsSide, params, loop, srcAnim)
 				animSetFacing(a, params.facing)
 				animSetXShear(a, params.xshear)
 				animSetAngle(a, params.angle)
+				animSetXAngle(a, params.xangle)
+				animSetYAngle(a, params.yangle)
+				animSetProjection(a, params.projection)
+				animSetfLength(a, params.focallength)
 				animSetWindow(a, params.window[1], params.window[2], params.window[3], params.window[4])
 				if srcAnim ~= nil then
 					animApplyVel(a, srcAnim)
@@ -827,7 +831,19 @@ local function drawPortraitLayer(t_portraits, side, t, subname, last, dataField)
 		return
 	end
 	-- stacked portraits up to num
-	for member = lastIdx, 1, -1 do
+	local order = {}
+	for member = 1, lastIdx do
+		local paramsSide, params = getParams(side, member, t, subname)
+		order[#order + 1] = {m = member, o = params.draworder}
+	end
+	table.sort(order, function(a, b)
+		if a.o == b.o then
+			return a.m < b.m -- stable legacy tie-break (invertorder=0 behavior)
+		end
+		return a.o < b.o
+	end)
+	for _, it in ipairs(order) do
+		local member = it.m
 		local paramsSide, params = getParams(side, member, t, subname)
 		local v = t_portraits[member]
 		local data = v[dataField]
@@ -1024,20 +1040,64 @@ function start.f_getCursorData(pn)
 	return motif.select_info['p' .. (pn - 1) % 2 + 1]
 end
 
-local function getCellFacing(default, col, row)
-	local cell = motif.select_info.cell[col .. '-' .. row]
-	if cell ~= nil and cell.facing ~= 0 then
-		return cell.facing
+local function getCellOverride(col, row)
+    local cells = motif.select_info.cell
+    local exact = col .. '-' .. row
+	local colWild = col .. '-*'
+	local rowWild = '*-' .. row
+    if cells[exact] then 
+		return cells[exact] 
+	end
+    if cells[colWild] then 
+		return cells[colWild] 
+	end
+    if cells[rowWild] then 
+		return cells[rowWild] 
+	end
+    if cells['*-*'] then 
+		return cells['*-*'] 
+	end
+    return nil
+end
+
+function getCellFacing(default, col, row)
+	local override = getCellOverride(col, row)
+	if override ~= nil and override.facing ~= 0 then
+		return override.facing
 	end
 	return default
 end
 
-local function getCellOffset(col, row)
-	local cell = motif.select_info.cell[col .. '-' .. row]
-	if cell ~= nil and cell.offset ~= nil then
-		return cell.offset
+function getCellOffset(col, row)
+	local override = getCellOverride(col, row)
+	if override ~= nil and override.offset ~= nil then
+		return override.offset
 	end
 	return {0, 0}
+end
+
+function getCellTransform(col, row, paramName, default)
+	local override = getCellOverride(col, row)
+	if override ~= nil then
+		local val = override[paramName]
+		-- Table Validation
+		if type(val) == "table" then
+			if paramName == "scale" then
+				if val[1] ~= 0 or val[2] ~= 0 then return val end
+			else
+				return val
+			end
+		elseif type(val) == "string" then
+			if val ~= "" then 
+				return val 
+			end
+		elseif type(val) == "number" then
+			if val ~= 0 then 
+				return val 
+			end
+		end
+	end
+	return default
 end
 
 --draw cursor
@@ -1109,8 +1169,21 @@ function start.f_drawCursor(pn, x, y, param, done)
 	if motif.select_info['p' .. pn].cursor[param][key] ~= nil then
 		params = motif.select_info['p' .. pn].cursor[param][key]
 	end
+	local a = params.AnimData
+	if a then -- inherit cell transformation
+		animSetFacing(a, getCellFacing(params.facing, x, y))
+		local scale = getCellTransform(x, y, "scale", params.scale)
+		animSetScale(a, scale[1], scale[2])
+		animSetXShear(a, getCellTransform(x, y, "xshear", params.xshear))
+		animSetAngle(a, getCellTransform(x, y, "angle", params.angle))
+		animSetXAngle(a, getCellTransform(x, y, "xangle", params.xangle))
+		animSetYAngle(a, getCellTransform(x, y, "yangle", params.yangle))
+		animSetProjection(a, getCellTransform(x, y, "projection", params.projection))
+		animSetfLength(a, getCellTransform(x, y, "focallength", params.focallength))
+		animUpdate(a)
+	end
 	main.f_animPosDraw(
-		params.AnimData,
+		a,
 		cd.currentPos[1],
 		cd.currentPos[2],
 		getCellFacing(params.facing, x, y)
@@ -1194,6 +1267,34 @@ function start.f_clearTimeText(text, totalSec)
 		x = '0' .. x
 	end
 	return text:gsub('%%h', h):gsub('%%m', m):gsub('%%s', s):gsub('%%x', x)
+end
+
+--returns formatted record text table
+function start.f_getRecordText()
+	local text = motif.select_info.record.text[gamemode()]
+	if text == nil then
+		return ""
+	end
+	local stats = jsonDecode('save/stats.json')
+	if stats.modes == nil or stats.modes[gamemode()] == nil or stats.modes[gamemode()].ranking == nil or stats.modes[gamemode()].ranking[1] == nil then
+		return ""
+	end
+	local t = stats.modes[gamemode()].ranking[1]
+	--time
+	text = start.f_clearTimeText(text, t.time)
+	--score
+	text = text:gsub('%%p', tostring(t.score))
+	--win
+	text = text:gsub('%%r', tostring(t.win))
+	--char name
+	local name = '?' --in case character being removed from roster
+	if main.t_charDef[t.chars[1]] ~= nil then
+		name = start.f_getCharData(main.t_charDef[t.chars[1]]).name
+	end
+	text = text:gsub('%%c', name)
+	--player name
+	text = text:gsub('%%n', t.name)
+	return text
 end
 
 --cursor sound data, play cursor sound
@@ -1414,7 +1515,7 @@ function start.f_matchPersistence()
 		end
 
 		-- if defeated members should be removed from team, or if life should be maintained
-		if main.dropDefeated or main.lifePersistence then
+		if main.dropDefeated or main.persistLife then
 			local t_removeMembers = {}
 			-- Turns
 			if start.p[1].teamMode == 2 then
@@ -1431,11 +1532,11 @@ function start.f_matchPersistence()
 								if main.dropDefeated then
 									t_removeMembers[memberIdx] = true
 								-- or resurrect and recover character's life
-								elseif main.lifePersistence then
+								elseif main.persistLife then
 									start.p[1].t_selected[memberIdx].life = math.max(1, f_lifeRecovery(f1.LifeMax or 0, f1.RatioLevel or 0))
 								end
 							-- otherwise maintain character's life
-							elseif main.lifePersistence then
+							elseif main.persistLife then
 								start.p[1].t_selected[memberIdx].life = f1.Life or start.p[1].t_selected[memberIdx].life
 							end
 						end
@@ -1458,11 +1559,11 @@ function start.f_matchPersistence()
 									if main.dropDefeated then
 										t_removeMembers[memberIdx] = true
 									-- or resurrect and recover character's life
-									elseif main.lifePersistence then
+									elseif main.persistLife then
 										start.p[1].t_selected[memberIdx].life = math.max(1, f_lifeRecovery(f.LifeMax or 0, f.RatioLevel or 0))
 									end
 								-- otherwise maintain character's life
-								elseif main.lifePersistence then
+								elseif main.persistLife then
 									start.p[1].t_selected[memberIdx].life = f.Life or start.p[1].t_selected[memberIdx].life
 								end
 							end
@@ -1746,6 +1847,35 @@ function start.f_selectChallenger()
 	return true
 end
 
+local function buildMusicParams(data)
+	local out = {}
+	for k, v in pairs(data) do
+		if type(k) == "string" and k:match("music$") then
+			if type(v) == "string" then
+				out[#out + 1] = k .. "=" .. v
+			elseif type(v) == "table" and #v > 0 then
+				local first = v[1]
+				-- If table looks like { "path.mp3", 100, 123, 456 } => positional args
+				local positional = (type(first) == "string") and (#v == 1 or type(v[2]) ~= "string")
+				if positional then
+					local pieces = {}
+					for i = 1, #v do
+						pieces[i] = tostring(v[i])
+					end
+					-- space-separated to avoid commas inside the value
+					out[#out + 1] = k .. "=" .. table.concat(pieces, " ")
+				else
+					-- Treat as multiple candidate tracks: {"a.mp3","b.mp3",...}
+					for i = 1, #v do
+						out[#out + 1] = k .. "=" .. tostring(v[i])
+					end
+				end
+			end
+		end
+	end
+	return table.concat(out, ", ")
+end
+
 function launchFight(data)
 	local t = {}
 	if continue() then -- on rematch all arguments are ignored and values are restored from last match
@@ -1770,17 +1900,7 @@ function launchFight(data)
 		t.p2numratio = data.p2numratio or {}
 		t.p2rounds = data.p2rounds or nil
 		t.exclude = data.exclude or {}
-		-- Music
-		t.musicParams = ''
-		for k, v in pairs(data) do
-			if (type(v) == "string" or type(v) == "number") and k:match('bgm') then
-				if t.musicParams == '' then
-					t.musicParams = k .. '=' .. v
-				else
-					t.musicParams = t.musicParams .. ', ' .. k .. '=' .. v
-				end
-			end
-		end
+		t.musicParams = buildMusicParams(data)
 		t.stage = data.stage or ''
 		t.ai = data.ai or nil
 		t.vsscreen = main.f_arg(data.vsscreen, main.motif.versusscreen)
@@ -1932,8 +2052,11 @@ function launchFight(data)
 		main.motif.continuescreen = continueScreen
 		main.motif.victoryscreen = victoryScreen
 		clearColor(motif.selectbgdef.bgclearcolor[1], motif.selectbgdef.bgclearcolor[2], motif.selectbgdef.bgclearcolor[3])
+		if start.exit or start.characterchange then
+			start.characterchange = false
+			break
 		-- here comes a new challenger
-		if start.challenger > 0 then
+		elseif start.challenger > 0 then
 			if t.challenger then -- end function called by f_arcadeChallenger() regardless of outcome
 				ok = not start.exit and not esc()
 				break
@@ -2016,34 +2139,60 @@ function start.updateDrawList()
 		for col = 1, motif.select_info.columns do
 			local cellIndex = (row - 1) * motif.select_info.columns + col
 			local t = start.t_grid[row][col]
+			local c = col - 1
+			local r = row - 1
 
 			if t.skip ~= 1 then
 				local charData = start.f_selGrid(cellIndex)
+				local function getTransforms(defaultFacing)
+					return {
+						facing      = getCellFacing(defaultFacing, c, r),
+						scale       = getCellTransform(c, r, "scale", nil),
+						xshear      = getCellTransform(c, r, "xshear", nil),
+						angle       = getCellTransform(c, r, "angle", nil),
+						xangle      = getCellTransform(c, r, "xangle", nil),
+						yangle      = getCellTransform(c, r, "yangle", nil),
+						projection  = getCellTransform(c, r, "projection", nil),
+						focallength = getCellTransform(c, r, "focallength", nil)
+					}
+				end
+
 				if (charData and charData.char ~= nil and (charData.hidden == 0 or charData.hidden == 3)) or motif.select_info.showemptyboxes then
-					table.insert(drawList, {
-						anim = motif.select_info.cell.bg.AnimData,
-						x = motif.select_info.pos[1] + t.x,
-						y = motif.select_info.pos[2] + t.y,
-						facing = getCellFacing(motif.select_info.cell.bg.facing, col - 1, row - 1)
-					})
+					local item = getTransforms(motif.select_info.cell.bg.facing)
+					item.anim = motif.select_info.cell.bg.AnimData
+					item.x = motif.select_info.pos[1] + t.x
+					item.y = motif.select_info.pos[2] + t.y
+					table.insert(drawList, item)
 				end
 
 				if charData and (charData.char == 'randomselect' or charData.hidden == 3) then
-					table.insert(drawList, {
-						anim = motif.select_info.cell.random.AnimData,
-						x = motif.select_info.pos[1] + t.x + motif.select_info.portrait.offset[1],
-						y = motif.select_info.pos[2] + t.y + motif.select_info.portrait.offset[2],
-						facing = getCellFacing(motif.select_info.cell.random.facing, col - 1, row - 1)
-					})
+					local item = getTransforms(motif.select_info.cell.random.facing)
+					item.anim = motif.select_info.cell.random.AnimData
+					item.x = motif.select_info.pos[1] + t.x + motif.select_info.portrait.offset[1]
+					item.y = motif.select_info.pos[2] + t.y + motif.select_info.portrait.offset[2]
+					table.insert(drawList, item)
 				end
 
 				if charData and charData.char_ref ~= nil and charData.hidden == 0 then
-					table.insert(drawList, {
-						anim = charData.cell_data,
-						x = motif.select_info.pos[1] + t.x + motif.select_info.portrait.offset[1],
-						y = motif.select_info.pos[2] + t.y + motif.select_info.portrait.offset[2],
-						facing = getCellFacing(motif.select_info.portrait.facing, col - 1, row - 1)
-					})
+					local item = getTransforms(motif.select_info.portrait.facing)
+					item.anim = charData.cell_data
+					item.x = motif.select_info.pos[1] + t.x + motif.select_info.portrait.offset[1]
+					item.y = motif.select_info.pos[2] + t.y + motif.select_info.portrait.offset[2]
+					-- apply cell scale override while preserving portrait resolution factor
+					if item.scale ~= nil then
+						local charInfo = main.t_selChars[charData.char_ref + 1]
+						if charInfo then
+							local portraitScale = charInfo.portraitscale or 1
+							local charLocalcoord = charInfo.localcoord or motif.info.localcoord[1]
+							-- recompute resolution compensation factor
+							local resFix = portraitScale * motif.info.localcoord[1] / charLocalcoord
+							item.scale = {
+								item.scale[1] * resFix,
+								item.scale[2] * resFix
+							}
+						end
+					end
+					table.insert(drawList, item)
 				end
 			end
 		end
@@ -2104,6 +2253,9 @@ function start.f_selectScreen()
 			end
 		end
 	end
+
+	textImgReset(motif.select_info.record.TextSpriteData)
+	textImgSetText(motif.select_info.record.TextSpriteData, start.f_getRecordText())
 
 	local staticDrawList = start.updateDrawList()
 	start.needUpdateDrawList = false
@@ -2296,6 +2448,9 @@ function start.f_selectScreen()
 				textImgSetText(motif.select_info.stage.TextSpriteData, stage_text)
 				textImgDraw(motif.select_info.stage.TextSpriteData)
 			end
+		else
+			--draw record text
+			textImgDraw(motif.select_info.record.TextSpriteData)
 		end
 		--draw timer
 		if motif.select_info.timer.count ~= -1 and (not start.p[1].teamEnd or not start.p[2].teamEnd or not start.p[1].selEnd or not start.p[2].selEnd or (main.stageMenu and not stageEnd)) and counter >= 0 then
@@ -3395,14 +3550,13 @@ end
 --loading loop called after versus screen is finished
 function start.f_selectLoading(musicParams)
 	clearAllSound()
-	local params = musicParams or ''
+	local parts = {}
+	if musicParams and musicParams ~= "" then
+		parts[#parts + 1] = musicParams
+	end
 	local function addParam(k, v)
 		if v == nil then return end
-		if params == '' then
-			params = k .. '=' .. tostring(v)
-		else
-			params = params .. ', ' .. k .. '=' .. tostring(v)
-		end
+		parts[#parts + 1] = k .. "=" .. tostring(v)
 	end
 	for side = 1, 2 do
 		for member, v in ipairs(start.p[side].t_selected) do
@@ -3411,24 +3565,28 @@ function start.f_selectLoading(musicParams)
 				v.loading = true
 			end
 			-- fold overrideCharData() payload into loadStart() params
-			local lifeRatio = nil
-			local attackRatio = nil
+			local lifeRatio, attackRatio
 			if v.ratioLevel then
-				lifeRatio = gameOption('Options.Ratio.Level' .. v.ratioLevel .. '.Life')
-				attackRatio = gameOption('Options.Ratio.Level' .. v.ratioLevel .. '.Attack')
+				lifeRatio = gameOption("Options.Ratio.Level" .. v.ratioLevel .. ".Life")
+				attackRatio = gameOption("Options.Ratio.Level" .. v.ratioLevel .. ".Attack")
 			end
-			local pfx = 'p' .. side .. '.' .. member .. '.'
-			addParam(pfx .. 'life', v.life)
-			addParam(pfx .. 'lifemax', v.lifeMax)
-			addParam(pfx .. 'power', v.power)
-			addParam(pfx .. 'dizzypoints', v.dizzyPoints)
-			addParam(pfx .. 'guardpoints', v.guardPoints)
-			addParam(pfx .. 'ratiolevel', v.ratioLevel)
-			addParam(pfx .. 'liferatio', v.lifeRatio or lifeRatio)
-			addParam(pfx .. 'attackratio', v.attackRatio or attackRatio)
-			addParam(pfx .. 'existed', v.existed)
+			local pfx = "p" .. side .. "." .. member .. "."
+			addParam(pfx .. "life", v.life)
+			addParam(pfx .. "lifemax", v.lifeMax)
+			addParam(pfx .. "power", v.power)
+			addParam(pfx .. "dizzypoints", v.dizzyPoints)
+			addParam(pfx .. "guardpoints", v.guardPoints)
+			addParam(pfx .. "ratiolevel", v.ratioLevel)
+			addParam(pfx .. "liferatio", v.lifeRatio or lifeRatio)
+			addParam(pfx .. "attackratio", v.attackRatio or attackRatio)
+			addParam(pfx .. "existed", v.existed)
 		end
 	end
+	addParam("persistlife", main.persistLife)
+	addParam("persistmusic", main.persistMusic)
+	addParam("persistrounds", main.persistRounds)
+	local params = table.concat(parts, ", ")
+	if main.debugLog then main.f_printTable(params, "debug/loadStartParams.txt") end
 	loadStart(params)
 end
 

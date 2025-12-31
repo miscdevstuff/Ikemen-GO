@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	lua "github.com/yuin/gopher-lua"
-	"gopkg.in/ini.v1"
 	"io"
 	"math"
 	"math/rand"
@@ -16,6 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	lua "github.com/yuin/gopher-lua"
+	"gopkg.in/ini.v1"
 )
 
 // ExecFunc executes a Lua function by name and returns its boolean result.
@@ -424,6 +425,62 @@ func setNestedLuaKey(l *lua.LState, tbl *lua.LTable, key string, val lua.LValue)
 	}
 }
 
+// Lowercases section names and replaces spaces with underscores.
+func normalizeSectionName(name string) string {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return name
+	}
+	// Collapse any whitespace runs (spaces/tabs/etc.) into single underscores.
+	return strings.Join(strings.Fields(name), "_")
+}
+
+// Converts an INI value string into a typed Lua value
+func parseIniLuaValue(l *lua.LState, raw string) lua.LValue {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		// Empty stays as empty string (matches typical INI semantics)
+		return lua.LString("")
+	}
+	// 1) Quoted string wins over everything else
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		if unq, err := strconv.Unquote(s); err == nil {
+			return lua.LString(unq)
+		}
+		// Fallback: strip outer quotes if Unquote fails
+		return lua.LString(s[1 : len(s)-1])
+	}
+	// 2) Comma-separated list -> Lua array table
+	if strings.Contains(s, ",") {
+		parts := strings.Split(s, ",")
+		tbl := l.NewTable()
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			tbl.Append(parseIniLuaValue(l, p))
+		}
+		return tbl
+	}
+	// 3) Bool
+	switch strings.ToLower(s) {
+	case "true":
+		return lua.LTrue
+	case "false":
+		return lua.LFalse
+	}
+	// 4) Number (prefer int, else float)
+	if i, err := strconv.ParseInt(s, 0, 64); err == nil {
+		return lua.LNumber(i)
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return lua.LNumber(RoundFloat(f, 6))
+	}
+	// Defensive fallback (should be rare)
+	return lua.LString(s)
+}
+
 func iniToLuaTable(l *lua.LState, f *ini.File) *lua.LTable {
 	t := l.NewTable()
 	if f == nil {
@@ -433,7 +490,7 @@ func iniToLuaTable(l *lua.LState, f *ini.File) *lua.LTable {
 		secTable := l.NewTable()
 		for _, k := range sec.Keys() {
 			name := k.Name()
-			val := lua.LString(k.Value())
+			val := parseIniLuaValue(l, k.Value())
 			if strings.Contains(name, ".") {
 				// use nested tables for dotted keys
 				setNestedLuaKey(l, secTable, name, val)
@@ -442,7 +499,7 @@ func iniToLuaTable(l *lua.LState, f *ini.File) *lua.LTable {
 				secTable.RawSetString(name, val)
 			}
 		}
-		t.RawSetString(sec.Name(), secTable)
+		t.RawSetString(normalizeSectionName(sec.Name()), secTable)
 	}
 	return t
 }
@@ -1105,7 +1162,53 @@ func systemScriptInit(l *lua.LState) {
 		if !ok {
 			userDataError(l, 1, a)
 		}
-		a.angle = float32(numArg(l, 2))
+		a.rot.angle = float32(numArg(l, 2))
+		return 0
+	})
+	luaRegister(l, "animSetXAngle", func(*lua.LState) int {
+		a, ok := toUserData(l, 1).(*Anim)
+		if !ok {
+			userDataError(l, 1, a)
+		}
+		a.rot.xangle = float32(numArg(l, 2))
+		return 0
+	})
+	luaRegister(l, "animSetYAngle", func(*lua.LState) int {
+		a, ok := toUserData(l, 1).(*Anim)
+		if !ok {
+			userDataError(l, 1, a)
+		}
+		a.rot.yangle = float32(numArg(l, 2))
+		return 0
+	})
+	luaRegister(l, "animSetProjection", func(*lua.LState) int {
+		a, ok := toUserData(l, 1).(*Anim)
+		if !ok {
+			userDataError(l, 1, a)
+		}
+		switch l.Get(2).Type() {
+
+		case lua.LTNumber:
+			a.projection = int32(numArg(l, 2))
+
+		case lua.LTString:
+			switch strings.ToLower(strings.TrimSpace(l.Get(2).String())) {
+			case "orthographic":
+				a.projection = int32(Projection_Orthographic)
+			case "perspective":
+				a.projection = int32(Projection_Perspective)
+			case "perspective2":
+				a.projection = int32(Projection_Perspective2)
+			}
+		}
+		return 0
+	})
+	luaRegister(l, "animSetfLength", func(*lua.LState) int {
+		a, ok := toUserData(l, 1).(*Anim)
+		if !ok {
+			userDataError(l, 1, a)
+		}
+		a.fLength = float32(numArg(l, 2))
 		return 0
 	})
 	luaRegister(l, "animUpdate", func(*lua.LState) int {
@@ -1126,12 +1229,10 @@ func systemScriptInit(l *lua.LState) {
 		tbl.ForEach(func(_, val lua.LValue) {
 			item, ok := val.(*lua.LTable)
 			if !ok {
-				// l.RaiseError("batchDraw expects a table of tables")
 				return
 			}
 
 			luaAnim := item.RawGetString("anim")
-
 			ud, ok := luaAnim.(*lua.LUserData)
 			if !ok {
 				return
@@ -1145,14 +1246,61 @@ func systemScriptInit(l *lua.LState) {
 			x := float32(lua.LVAsNumber(item.RawGetString("x")))
 			y := float32(lua.LVAsNumber(item.RawGetString("y")))
 			facing := float32(lua.LVAsNumber(item.RawGetString("facing")))
+
+			anim.SetPos(x, y)
+			anim.facing = facing
+
+			aSnap := *anim
+
+			if v := item.RawGetString("scale"); v.Type() == lua.LTTable {
+				sTbl := v.(*lua.LTable)
+				sclX := float32(lua.LVAsNumber(sTbl.RawGetInt(1)))
+				sclY := float32(lua.LVAsNumber(sTbl.RawGetInt(2)))
+				if sclX != 0 || sclY != 0 {
+					(&aSnap).SetScale(sclX, sclY)
+				}
+			}
+
+			if v := item.RawGetString("xshear"); v != lua.LNil {
+				aSnap.xshear = float32(lua.LVAsNumber(v))
+			}
+
+			if v := item.RawGetString("angle"); v != lua.LNil {
+				aSnap.rot.angle = float32(lua.LVAsNumber(v))
+			}
+			if v := item.RawGetString("xangle"); v != lua.LNil {
+				aSnap.rot.xangle = float32(lua.LVAsNumber(v))
+			}
+			if v := item.RawGetString("yangle"); v != lua.LNil {
+				aSnap.rot.yangle = float32(lua.LVAsNumber(v))
+			}
+
+			if v := item.RawGetString("projection"); v != lua.LNil {
+				switch v.Type() {
+				case lua.LTNumber:
+					aSnap.projection = int32(lua.LVAsNumber(v))
+				case lua.LTString:
+					switch strings.ToLower(strings.TrimSpace(v.String())) {
+					case "orthographic":
+						aSnap.projection = int32(Projection_Orthographic)
+					case "perspective":
+						aSnap.projection = int32(Projection_Perspective)
+					case "perspective2":
+						aSnap.projection = int32(Projection_Perspective2)
+					}
+				}
+			}
+
+			if v := item.RawGetString("focallength"); v != lua.LNil {
+				aSnap.fLength = float32(lua.LVAsNumber(v))
+			}
+
 			layerVal := item.RawGetString("layerno")
-			layer := anim.layerno
+			layer := aSnap.layerno
 			if layerVal != lua.LNil {
 				layer = int16(lua.LVAsNumber(layerVal))
 			}
-			anim.SetPos(x, y)
-			anim.facing = facing
-			aSnap := *anim
+
 			layerLocal := layer
 			sys.luaQueueLayerDraw(int(layerLocal), func() {
 				(&aSnap).Draw(layerLocal)
@@ -2267,8 +2415,8 @@ func systemScriptInit(l *lua.LState) {
 		l.Push(lua.LString(s))
 		return 1
 	})
-	luaRegister(l, "getLaunchFightParams", func(*lua.LState) int {
-		lv := toLValue(l, sys.sel.launchFightParams)
+	luaRegister(l, "getGameParams", func(*lua.LState) int {
+		lv := toLValue(l, sys.sel.gameParams)
 		lTable, ok := lv.(*lua.LTable)
 		if !ok {
 			l.RaiseError("Error: 'lv' is not a *lua.LTable")
@@ -2865,14 +3013,14 @@ func systemScriptInit(l *lua.LState) {
 		}
 		if !nilArg(l, 1) {
 			entries := SplitAndTrim(strArg(l, 1), ",")
-			if sys.sel.launchFightParams == nil {
-				sys.sel.launchFightParams = newLaunchFightParams()
+			if sys.sel.gameParams == nil {
+				sys.sel.gameParams = newGameParams()
 			} else {
-				sys.sel.launchFightParams.Reset()
+				sys.sel.gameParams.Reset()
 			}
-			sys.sel.launchFightParams.AppendParams(entries)
+			sys.sel.gameParams.AppendParams(entries)
 			// Feed normalized music params to Music.
-			sys.sel.music.AppendParams(sys.sel.launchFightParams.MusicEntries())
+			sys.sel.music.AppendParams(sys.sel.gameParams.MusicEntries())
 		}
 		sys.loadStart()
 		return 0
@@ -2930,6 +3078,37 @@ func systemScriptInit(l *lua.LState) {
 			return 0
 		}
 		l.RaiseError("\nmodifyGameOption: %v\n", err.Error())
+		return 0
+	})
+	luaRegister(l, "modifyMotif", func(l *lua.LState) int {
+		query := strArg(l, 1)
+		// Handle the second argument which can be nil, string, or a table
+		val := l.Get(2)
+		var value interface{}
+		if val.Type() == lua.LTBool {
+			// Convert Lua bools to native Go bools
+			value = lua.LVAsBool(val)
+		} else if val == lua.LNil {
+			// nil value means remove a map entry or clear an array depending on context
+			value = nil
+		} else if tbl, ok := val.(*lua.LTable); ok {
+			// If a table is provided, treat it as an array of strings
+			var arr []string
+			tbl.ForEach(func(k, v lua.LValue) {
+				arr = append(arr, v.String())
+			})
+			value = arr
+		} else {
+			// Otherwise, treat it as a string
+			value = val.String()
+		}
+
+		// Pass interface{} value
+		err := sys.motif.SetValueUpdate(query, value)
+		if err == nil {
+			return 0
+		}
+		l.RaiseError("\nmodifyMotif: %v\n", err.Error())
 		return 0
 	})
 	luaRegister(l, "mapSet", func(*lua.LState) int {
@@ -3465,14 +3644,27 @@ func systemScriptInit(l *lua.LState) {
 		if !sys.paused || sys.frameStepFlag {
 			if !sys.motif.hi.initialized {
 				var mode string
-				var place int32
+				var place, endtime int32
+				var nofade, nobgs, nooverlay bool
 				if !nilArg(l, 1) {
 					mode = strArg(l, 1)
 				}
 				if !nilArg(l, 2) {
 					place = int32(numArg(l, 2))
 				}
-				sys.motif.hi.init(&sys.motif, mode, place)
+				if !nilArg(l, 3) {
+					endtime = int32(numArg(l, 3))
+				}
+				if !nilArg(l, 4) {
+					nofade = boolArg(l, 4)
+				}
+				if !nilArg(l, 5) {
+					nobgs = boolArg(l, 5)
+				}
+				if !nilArg(l, 6) {
+					nooverlay = boolArg(l, 6)
+				}
+				sys.motif.hi.init(&sys.motif, mode, place, endtime, nofade, nobgs, nooverlay)
 			}
 			if sys.motif.hi.active {
 				sys.motif.hi.step(&sys.motif)
@@ -3570,7 +3762,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "sffNew", func(l *lua.LState) int {
 		if !nilArg(l, 1) {
-			sff, err := loadSff(strArg(l, 1), false)
+			sff, err := loadSff(strArg(l, 1), false, true)
 			if err != nil {
 				l.RaiseError("\nCan't load %v: %v\n", strArg(l, 1), err.Error())
 			}
@@ -3932,10 +4124,6 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "setRoundTime", func(l *lua.LState) int {
 		sys.maxRoundTime = int32(numArg(l, 1))
-		return 0
-	})
-	luaRegister(l, "setConsecutiveRounds", func(l *lua.LState) int {
-		sys.consecutiveRounds = boolArg(l, 1)
 		return 0
 	})
 	luaRegister(l, "setTeamMode", func(*lua.LState) int {
@@ -4351,7 +4539,53 @@ func systemScriptInit(l *lua.LState) {
 		if !ok {
 			userDataError(l, 1, ts)
 		}
-		ts.angle = float32(numArg(l, 2))
+		ts.rot.angle = float32(numArg(l, 2))
+		return 0
+	})
+	luaRegister(l, "textImgSetXAngle", func(*lua.LState) int {
+		ts, ok := toUserData(l, 1).(*TextSprite)
+		if !ok {
+			userDataError(l, 1, ts)
+		}
+		ts.rot.xangle = float32(numArg(l, 2))
+		return 0
+	})
+	luaRegister(l, "textImgSetYAngle", func(*lua.LState) int {
+		ts, ok := toUserData(l, 1).(*TextSprite)
+		if !ok {
+			userDataError(l, 1, ts)
+		}
+		ts.rot.yangle = float32(numArg(l, 2))
+		return 0
+	})
+	luaRegister(l, "textImgSetProjection", func(*lua.LState) int {
+		ts, ok := toUserData(l, 1).(*TextSprite)
+		if !ok {
+			userDataError(l, 1, ts)
+		}
+		switch l.Get(2).Type() {
+
+		case lua.LTNumber:
+			ts.projection = int32(numArg(l, 2))
+
+		case lua.LTString:
+			switch strings.ToLower(strings.TrimSpace(l.Get(2).String())) {
+			case "orthographic":
+				ts.projection = int32(Projection_Orthographic)
+			case "perspective":
+				ts.projection = int32(Projection_Perspective)
+			case "perspective2":
+				ts.projection = int32(Projection_Perspective2)
+			}
+		}
+		return 0
+	})
+	luaRegister(l, "textImgSetfLength", func(*lua.LState) int {
+		ts, ok := toUserData(l, 1).(*TextSprite)
+		if !ok {
+			userDataError(l, 1, ts)
+		}
+		ts.fLength = float32(numArg(l, 2))
 		return 0
 	})
 	luaRegister(l, "textImgUpdate", func(*lua.LState) int {
@@ -7025,6 +7259,12 @@ func triggerFunctions(l *lua.LState) {
 			l.Push(lua.LNumber(sys.getSlowtime()))
 		case "superpausetime":
 			l.Push(lua.LNumber(sys.supertime))
+		case "persistlife":
+			l.Push(lua.LBool(sys.sel.gameParams.PersistLife))
+		case "persistmusic":
+			l.Push(lua.LBool(sys.sel.gameParams.PersistMusic))
+		case "persistrounds":
+			l.Push(lua.LBool(sys.sel.gameParams.PersistRounds))
 		default:
 			l.RaiseError("\nInvalid argument: %v\n", strArg(l, 1))
 		}
