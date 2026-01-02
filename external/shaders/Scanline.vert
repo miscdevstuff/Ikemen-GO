@@ -1,29 +1,19 @@
-#if __VERSION__ >= 450
-layout(push_constant, std430) uniform u {
-	uniform vec2 TextureSize;
-};
-layout(location = 0) in vec2 VertCoord;
-layout(location = 0) out vec3 vTexCoord;
-#else
-#if __VERSION__ >= 130
-#define COMPAT_VARYING out
-#define COMPAT_ATTRIBUTE in
-in vec3 TexCoord;
-out vec3 vTexCoord;
-#else
-#define COMPAT_VARYING varying 
-#define COMPAT_ATTRIBUTE attribute 
-#endif
-uniform vec2 TextureSize;
-COMPAT_ATTRIBUTE vec2 VertCoord;
+/* Scanline Vertex Shader - Android/GLES 2.0 Compatible */
+
+#ifdef GL_ES
+    precision mediump float;
+    precision mediump int;
 #endif
 
+attribute vec2 VertCoord;
+uniform vec2 TextureSize;
+
+// Output to frag
+varying vec3 v_texCoord;
 
 void main(void) {
-	gl_Position = vec4(VertCoord, 0.0, 1.0);
-#if __VERSION__ >= 130
-    vTexCoord = vec3((VertCoord + 1.0) / 2.0, 0);
-#else
-    gl_TexCoord[0].xy = (VertCoord + 1.0) / 2.0;
-#endif
+    gl_Position = vec4(VertCoord, 0.0, 1.0);
+    
+    // Z is explicitly 0.0, XY is standard texture mapping
+    v_texCoord = vec3((VertCoord + 1.0) / 2.0, 0.0);
 }
