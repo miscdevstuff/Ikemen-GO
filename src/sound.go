@@ -35,8 +35,8 @@ import (
 )
 
 const (
-    audioOutLen          = 4096
-    audioFrequency       = 22050
+	audioOutLen          = 4096
+	audioFrequency       = 22050
 	audioPrecision       = 4
 	audioResampleQuality = 1
 	audioSoundFont       = "sound/soundfont.sf2" // default path for MIDI soundfont
@@ -438,12 +438,12 @@ func (b *StreamLooper) Seek(p int) error {
 // Bgm
 
 type Bgm struct {
-    filename   string
-    bgmVolume  int
-    volRestore int
-    loop       int
-    streamer   beep.StreamSeeker
-    ctrl       *beep.Ctrl
+	filename   string
+	bgmVolume  int
+	volRestore int
+	loop       int
+	streamer   beep.StreamSeeker
+	ctrl       *beep.Ctrl
 	volctrl    *effects.Volume
 	format     string
 	freqmul    float32
@@ -477,7 +477,7 @@ func (bgm *Bgm) Open(filename string, loop, bgmVolume, bgmLoopStart, bgmLoopEnd,
 	ctx, bgm.cancel = context.WithCancel(context.Background())
 	bgm.mu.Unlock()
 
-    if runtime.GOOS == "android" {
+	if runtime.GOOS == "android" {
 		// Update state fields
 		bgm.filename = filename
 		bgm.loop = loop
@@ -796,6 +796,10 @@ func (bgm *Bgm) SetFreqMul(freqmul float32) {
 // OpenFromStreamer wires an arbitrary Beep streamer (e.g. Reisen-backed audio)
 // into the existing BGM path so the video BGM replaces/uses the same channel.
 func (bgm *Bgm) OpenFromStreamer(stream beep.Streamer, srcSampleRate beep.SampleRate, bgmVolume int) {
+	// FIX: Disable on Android to avoid Speaker/Mixer conflict
+	if runtime.GOOS == "android" {
+		return
+	}
 	// Right away, cancel any running goroutines.
 	bgm.mu.Lock()
 	if bgm.cancel != nil {
@@ -1154,6 +1158,8 @@ type SoundChannel struct {
 	number            int32
 	timeStamp         int32
 	sdlChannel        int
+	mugenChannel      int32
+	mugenPriority     int32
 }
 
 func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul float32, loopStart, loopEnd, startPosition int) {
@@ -1161,8 +1167,8 @@ func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul flo
 		return
 	}
 
-    // ANDROID PATH (SDL_mixer)
-    if runtime.GOOS == "android" {
+	// ANDROID PATH (SDL_mixer)
+	if runtime.GOOS == "android" {
 		if sound.chunk != nil {
 			s.sound = sound
 			s.group = group
@@ -1191,7 +1197,7 @@ func (s *SoundChannel) Play(sound *Sound, group, number, loop int32, freqmul flo
 		return
 	}
 
-    // Desktop/Beep Logic (Unchanged)
+	// Desktop/Beep Logic (Unchanged)
 	s.sound = sound
 	s.group = group
 	s.number = number
@@ -1238,6 +1244,9 @@ func (s *SoundChannel) Stop() {
 			// Actually halt the hardware channel
 			mix.HaltChannel(s.sdlChannel)
 			s.sound = nil
+			// Reset mugenChannel and mugenPriority so these slots can be reused cleanly
+			s.mugenChannel = -1
+			s.mugenPriority = 0
 		}
 		return
 	}
@@ -1281,6 +1290,8 @@ func (s *SoundChannel) SetPan(p, ls float32, x *float32) {
 
 func (s *SoundChannel) SetPriority(priority int32) {
 	if runtime.GOOS == "android" {
+		// Store priority for the check in SoundChannels.New
+		s.mugenPriority = priority
 		return
 	}
 	if s.ctrl != nil && s.sfx != nil {
@@ -1290,6 +1301,8 @@ func (s *SoundChannel) SetPriority(priority int32) {
 
 func (s *SoundChannel) SetChannel(channel int32) {
 	if runtime.GOOS == "android" {
+		// Store the channel ID on Android so 'Get' can find it later
+		s.mugenChannel = channel
 		return
 	}
 	if s.ctrl != nil && s.sfx != nil {
@@ -1385,12 +1398,27 @@ func (s *SoundChannels) New(ch int32, lowpriority bool, priority int32) *SoundCh
 			// FIX: Check s.channels[i].sfx != nil.
 			// On Android, sfx is nil, so we cannot check channel/priority.
 			// This check prevents the Nil Pointer Dereference crash.
-			if s.channels[i].IsPlaying() && s.channels[i].sfx != nil && s.channels[i].sfx.channel == ch {
-				if (lowpriority && priority <= s.channels[i].sfx.priority) || priority < s.channels[i].sfx.priority {
-					return nil
+			sc := &s.channels[i]
+			// --- LOGIC SPLIT ---
+			if runtime.GOOS == "android" {
+				// Android Logic: Check shadow fields
+				if sc.IsPlaying() && sc.sound != nil && sc.mugenChannel == ch {
+					// Check Priority (Exact copy of Desktop logic, using shadow field)
+					if (lowpriority && priority <= sc.mugenPriority) || priority < sc.mugenPriority {
+						return nil // Cannot interrupt, higher priority sound playing
+					}
+					sc.Stop()
+					return sc
 				}
-				s.channels[i].Stop()
-				return &s.channels[i]
+			} else {
+				// Desktop Logic: Check sfx fields
+				if sc.IsPlaying() && sc.sfx != nil && sc.sfx.channel == ch {
+					if (lowpriority && priority <= sc.sfx.priority) || priority < sc.sfx.priority {
+						return nil
+					}
+					sc.Stop()
+					return sc
+				}
 			}
 		}
 	}
@@ -1417,11 +1445,17 @@ func (s *SoundChannels) reserveChannel() *SoundChannel {
 func (s *SoundChannels) Get(ch int32) *SoundChannel {
 	if ch >= 0 && ch < s.count() {
 		for i := range s.channels {
-			if s.channels[i].IsPlaying() && s.channels[i].sfx != nil && s.channels[i].sfx.channel == ch {
-				return &s.channels[i]
+			// Logic Split for Get()
+			if runtime.GOOS == "android" {
+				if s.channels[i].IsPlaying() && s.channels[i].mugenChannel == ch {
+					return &s.channels[i]
+				}
+			} else {
+				if s.channels[i].IsPlaying() && s.channels[i].sfx != nil && s.channels[i].sfx.channel == ch {
+					return &s.channels[i]
+				}
 			}
 		}
-		//return &s.channels[ch]
 	}
 	return nil
 }
@@ -1474,11 +1508,12 @@ func (s *SoundChannels) Tick() {
 		// FIX: Android Channel Lifecycle Management
 		if runtime.GOOS == "android" {
 			// If we have a sound marked as active, check if SDL is still actually playing it.
+						// Clean up finished sounds so the channel slot (and mugenChannel ID) is freed
 			if v.sound != nil {
-				// mix.Playing(channel) returns 1 if playing, 0 if finished/stopped.
 				if mix.Playing(v.sdlChannel) == 0 {
-					// The sound finished natively; clear it so this SoundChannel slot is free for new sounds.
 					v.sound = nil
+					v.mugenChannel = -1
+					v.mugenPriority = 0
 				}
 			}
 			continue
