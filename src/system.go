@@ -414,8 +414,16 @@ func (s *System) init(w, h int32) *lua.LState {
 	gfx.BeginFrame(false)
 	// And the audio.
 	// --- AUDIO INIT ---
-	if runtime.GOOS == "android" {
-		// Use Config values, but cast them to int for SDL
+		if runtime.GOOS == "android" {
+		// 1. Initialize Decoders
+		// Go-SDL2 returns an error object, not the flag bitmask.
+		flags := mix.INIT_OGG | mix.INIT_MP3 | mix.INIT_FLAC | mix.INIT_MOD
+		if err := mix.Init(flags); err != nil {
+			sys.errLog.Printf("WARNING: Mix_Init failed: %v", err)
+		} else {
+			sys.errLog.Printf("SDL_mixer decoders initialized successfully.")
+		}
+		// 2. Open Audio Device
 		rate := int(sys.cfg.Sound.SampleRate)
 		buf := int(sys.cfg.Sound.BufferSize)
 		if err := mix.OpenAudio(rate, mix.DEFAULT_FORMAT, 2, buf); err != nil {

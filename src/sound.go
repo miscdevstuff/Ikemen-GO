@@ -17,6 +17,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -459,6 +460,17 @@ func newBgm() *Bgm {
 }
 
 func (bgm *Bgm) Stop() {
+	// ANDROID LOGIC: Halt the Hardware Mixer
+	if runtime.GOOS == "android" {
+		mix.HaltMusic() // Tells SDL to stop playing immediately
+		if bgm.music != nil {
+			bgm.music.Free() // Release C memory
+			bgm.music = nil
+		}
+		bgm.filename = ""
+		return
+	}
+	// DESKTOP LOGIC: Unlink the Streamer
 	if bgm.ctrl != nil {
 		speaker.Lock()
 		bgm.ctrl.Streamer = nil
@@ -483,7 +495,7 @@ func (bgm *Bgm) Open(filename string, loop, bgmVolume, bgmLoopStart, bgmLoopEnd,
 		bgm.loop = loop
 		bgm.bgmVolume = bgmVolume
 		bgm.freqmul = freqmul
-		
+
 		// 1. Clear previous music
 		if bgm.music != nil {
 			bgm.music.Free()
@@ -494,47 +506,62 @@ func (bgm *Bgm) Open(filename string, loop, bgmVolume, bgmLoopStart, bgmLoopEnd,
 		if filename == "" {
 			return
 		}
-		
+
 		// Don't do anything if we have the nomusic/nosound command line flag
 		if _, ok := sys.cmdFlags["-nomusic"]; ok { return }
 		if _, ok := sys.cmdFlags["-nosound"]; ok { return }
 
-		// 3. Load Music Stream (SDL streams directly from disk, no RAM buffer needed)
-		if m, err := mix.LoadMUS(filename); err == nil {
+		// 3. Format Filtering (Match Desktop Logic)
+		// We check extensions to ensure we aren't feeding garbage to SDL.
+		// Note: We don't check for BGMRAMBuffer here because SDL_mixer streams natively 
+		// and does not require the "SwapSeeker" workaround that Beep needs.
+		isValid := false
+		if HasExtension(bgm.filename, ".ogg") || HasExtension(bgm.filename, ".mp3") ||
+		   HasExtension(bgm.filename, ".wav") || HasExtension(bgm.filename, ".flac") ||
+		   HasExtension(bgm.filename, ".mod") || HasExtension(bgm.filename, ".xm") || 
+		   HasExtension(bgm.filename, ".it") || HasExtension(bgm.filename, ".s3m") {
+			isValid = true
+			bgm.format = "supported" // SDL detects specific type automatically
+		}
+		if !isValid {
+			sys.errLog.Printf("Android BGM: Unsupported file extension: %v", bgm.filename)
+			//return
+		}
+
+		// 4. Resolve Absolute Path
+		// SDL2 on Android treats relative paths as Assets (in APK). We force SD Card access.
+		absPath, err := filepath.Abs(filename)
+		if err != nil {
+			sys.errLog.Printf("Android Path Error: %v", err)
+			absPath = filename // Fallback
+		}
+
+		sys.errLog.Printf("Android BGM Loading: %s", absPath)
+
+		// 5. Load Music Stream
+		if m, err := mix.LoadMUS(absPath); err == nil {
 			bgm.music = m
-			
-			// 4. Handle Looping
+			// Handle Looping
 			// SDL: -1 = infinite, 0 = play once
 			sdlLoops := 0
 			if loop != 0 {
-				sdlLoops = -1 // Default to infinite if loop is enabled
-				// Note: SDL_mixer's Mix_PlayMusic doesn't support specific loop counts easily,
-				// but Mugen BGM is almost always infinite.
+				sdlLoops = -1 
 			}
-			
-			// 5. Volume
-			// Mix_VolumeMusic takes 0-128. We map the engine's volume logic here if needed,
-			// or just set max and let UpdateVolume handle it later.
+			// Volume & Play
 			mix.VolumeMusic(128)
-
-			bgm.music.Play(sdlLoops)
-			
-			// 6. Seek (If supported by format)
-			if startPosition > 0 {
-				// Mix_SetMusicPosition expects seconds (float64)
-				// We need to know sample rate to convert samples -> seconds.
-				// Assuming 44100 if unknown, or just skipping seek for safety on Android for now.
-				// seconds := float64(startPosition) / 44100.0
-				// mix.SetMusicPosition(seconds)
+			if err := bgm.music.Play(sdlLoops); err != nil {
+				sys.errLog.Printf("Android BGM Play Error: %v", err)
 			}
-			
+			// Seek (Optional / stability dependent)
+			if startPosition > 0 {
+				// Skipping seek for stability on Android unless strictly needed
+			}
 			// Trigger volume update to apply user configs
 			bgm.UpdateVolume()
 		} else {
-			sys.errLog.Printf("Android: Failed to load bgm: %v", err)
+			sys.errLog.Printf("Android BGM FAILED to load: %v (Path: %s)", err, absPath)
 		}
-		
-		// Android logic done. Return early to skip Beep logic.
+		// Android logic done. Return early.
 		return
 	}
 	bgm.filename = filename
