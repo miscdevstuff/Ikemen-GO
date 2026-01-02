@@ -12,12 +12,13 @@ import android.view.ViewGroup
 import android.widget.Toast
 import org.libsdl.app.SDLActivity
 import java.io.File
+import android.content.Context
 
 // UI Imports
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.View
-import android.widget.FrameLayout // <--- ADDED THIS IMPORT
+import android.widget.FrameLayout
 import android.widget.PopupMenu
 import androidx.appcompat.widget.AppCompatButton
 
@@ -74,18 +75,47 @@ class MainActivity : SDLActivity() {
                 tmpDir.mkdirs()
             }
 
-            // --- Extraction Logic ---
-            // 1. Always copy assets.zip for user backup
+            // --- Backup Logic (Install / Update / Missing) ---
             val backupZip = File(rootDir, "assets.zip")
-            if (!backupZip.exists()) {
-                Log.i(TAG, "Copying assets.zip backup...")
-                AssetsExtractor.copyAssetsZip(this, backupZip)
+
+            // Get current app version code
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            val currentVersion = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toLong()
             }
 
-            // 2. Extract if game missing (Check system.def)
+            // Get last saved version code
+            val prefs = getSharedPreferences("IkemenPrefs", Context.MODE_PRIVATE)
+            val lastVersion = prefs.getLong("assets_zip_version", -1)
+
+            // Condition: File missing OR App Updated (Version mismatch)
+            if (!backupZip.exists() || currentVersion != lastVersion) {
+                Log.i(TAG, "New version detected ($currentVersion) or zip missing. Updating assets.zip...")
+
+                // Run in background to prevent ANR/Freeze
+                Thread {
+                    try {
+                        AssetsExtractor.copyAssetsZip(this, backupZip)
+                        // Save the new version so we don't do this next time
+                        prefs.edit().putLong("assets_zip_version", currentVersion).apply()
+                        Log.i(TAG, "assets.zip updated successfully.")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to update assets.zip", e)
+                    }
+                }.start()
+            } else {
+                Log.i(TAG, "assets.zip is up to date. Skipping copy.")
+            }
+
+            // --- Extraction Logic (First Run/Game missing (Check system.def)) ---
+            // Extract if game missing
             val systemDef = File(rootDir, "data/system.def")
             if (!systemDef.exists()) {
                 Log.i(TAG, "No game found. Extracting initial assets...")
+                // This runs on main thread because we need it to play
                 AssetsExtractor.ensureAssetsExtracted(this, rootDir)
             }
 
