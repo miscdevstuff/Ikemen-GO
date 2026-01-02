@@ -1,38 +1,23 @@
+/* Font Fragment Shader - Android/GLES 2.0 Compatible */
+
 #ifdef GL_ES
-precision mediump float;
-precision mediump int;
+    precision mediump float;
+    precision mediump int;
 #endif
-#if __VERSION__ >= 450
-#define COMPAT_TEXTURE texture
-#define COMPAT_FRAGCOLOR FragColor
-layout(location = 0) out vec4 FragColor;
-layout(location = 0) in vec2 fragTexCoord;
 
-layout(push_constant, std430) uniform u {
-	vec4 textColor;
-};
-layout(binding = 0) uniform sampler2D tex;
-#else
-#if __VERSION__ >= 130
-#define COMPAT_VARYING in
-#define COMPAT_ATTRIBUTE in
-#define COMPAT_TEXTURE texture
-#define COMPAT_FRAGCOLOR FragColor
-out vec4 FragColor;
-#else
-#define COMPAT_VARYING varying
-#define COMPAT_ATTRIBUTE attribute
-#define COMPAT_TEXTURE texture2D
-#define COMPAT_FRAGCOLOR gl_FragColor
-#endif
-COMPAT_VARYING vec2 fragTexCoord;
-uniform vec4 textColor;
+// Inputs from vertex shader
+varying vec2 fragTexCoord;
+
+// Uniforms
 uniform sampler2D tex;
-#endif
+uniform vec4 textColor;
 
-
-void main()
-{
-    vec4 sampled = vec4(1.0, 1.0, 1.0, COMPAT_TEXTURE(tex, fragTexCoord).r);
-    COMPAT_FRAGCOLOR = min(textColor, vec4(1.0, 1.0, 1.0, 1.0)) * sampled;
+void main() {
+    // Font textures are usually single-channel (alpha/red), so we put it in Alpha
+    // Original logic: vec4(1.0, 1.0, 1.0, texture(...).r)
+    vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(tex, fragTexCoord).r);
+    
+    // Multiply by text color
+    // min(textColor, 1.0) is a safety check from the original shader
+    gl_FragColor = min(textColor, vec4(1.0, 1.0, 1.0, 1.0)) * sampled;
 }
