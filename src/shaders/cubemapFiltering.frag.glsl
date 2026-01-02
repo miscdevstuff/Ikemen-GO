@@ -25,11 +25,13 @@ layout(location = 0) out vec4 FragColor;
 #define COMPAT_TEXTURE_CUBE_LOD textureLod
 out vec4 FragColor;
 #else
-#extension GL_EXT_gpu_shader4 : enable
-#extension GL_ARB_shader_texture_lod : enable
+// --- ANDROID FIX START ---
+#extension GL_EXT_shader_texture_lod : enable
 #define COMPAT_VARYING varying
 #define FragColor gl_FragColor
-#define COMPAT_TEXTURE_CUBE_LOD textureCubeLod
+// GLES 2.0 requires the EXT suffix for this function
+#define COMPAT_TEXTURE_CUBE_LOD textureCubeLodEXT
+// --- ANDROID FIX END ---
 #endif
 uniform samplerCube cubeMap;
 uniform int sampleCount;

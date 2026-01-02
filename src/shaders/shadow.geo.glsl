@@ -1,3 +1,7 @@
+#ifdef GL_ES
+precision highp float;
+precision mediump int;
+#endif
 #if __VERSION__ >= 130
 #define COMPAT_POS_IN(i) gl_in[i].gl_Position
 layout(triangle_strip, max_vertices = 18) out;

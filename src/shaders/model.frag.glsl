@@ -81,6 +81,7 @@ layout(location = 6) in vec4 lightSpacePos[4];
 layout(location = 0) out vec4 FragColor;
 #else
 #if __VERSION__ >= 130
+// --- DESKTOP GL 3.0 PATH ---
 #extension GL_ARB_texture_cube_map_array : enable
 #define COMPAT_VARYING in
 #define COMPAT_TEXTURE texture
@@ -93,17 +94,23 @@ uniform samplerCubeArray shadowCubeMap;
 #define COMPAT_SHADOW_CUBE_MAP_TEXTURE() texture(shadowCubeMap,vec4(xyz,index)).r
 #endif
 #else
-#extension GL_ARB_shader_texture_lod : enable
+// --- ANDROID / GLES 2.0 PATH (THE FIX) ---
+#extension GL_EXT_shader_texture_lod : enable
+#extension GL_OES_standard_derivatives : enable
+#extension GL_OES_texture_cube_map : enable
 #define COMPAT_VARYING varying
 #define FragColor gl_FragColor
 #define COMPAT_TEXTURE texture2D
 #define COMPAT_TEXTURE_CUBE textureCube
-#define COMPAT_TEXTURE_CUBE_LOD textureCubeLod
+// Note: GLES 2 extension adds 'EXT' suffix
+#define COMPAT_TEXTURE_CUBE_LOD textureCubeLodEXT
 #ifdef ENABLE_SHADOW
 //uniform sampler2D shadowMap[4];
 uniform samplerCube shadowCubeMap[4];
 #define COMPAT_SHADOW_MAP_TEXTURE() textureCube(shadowCubeMap[index],vec3(1.0, -(xy.y*2-1),-(xy.x*2-1))).r
 #define COMPAT_SHADOW_CUBE_MAP_TEXTURE() textureCube(shadowCubeMap[index],xyz).r
+#endif
+// -----------------------------------------
 #endif
 #endif
 struct Light
