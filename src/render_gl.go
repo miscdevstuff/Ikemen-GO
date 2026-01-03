@@ -86,7 +86,16 @@ func (s *ShaderProgram_GL21) RegisterTextures(names ...string) {
 
 func (r *Renderer_GL21) compileShader(shaderType uint32, src string) (shader uint32, err error) {
 	shader = gl.CreateShader(shaderType)
-	src = "#version 120\n" + src + "\x00"
+	
+	// FIX: Use GLES 2.0 (#version 100) on Android to allow precision qualifiers.
+	// Desktop GL 2.1 uses #version 120 (where precision is illegal).
+	versionHeader := "#version 120\n"
+	if runtime.GOOS == "android" {
+		versionHeader = "#version 100\n"
+	}
+	
+	src = versionHeader + src + "\x00"
+	
 	s, _ := gl.Strs(src)
 	var l int32 = int32(len(src) - 1)
 	gl.ShaderSource(shader, 1, s, &l)
@@ -100,8 +109,11 @@ func (r *Renderer_GL21) compileShader(shaderType uint32, src string) (shader uin
 		if size > 0 {
 			str := make([]byte, size+1)
 			gl.GetShaderInfoLog(shader, size, &l, &str[0])
+			// NEW: Print actual error to Logcat
+			fmt.Printf("[GL21] SHADER COMPILE ERROR:\n%s\n", str[:l])
 			err = Error(str[:l])
 		} else {
+			fmt.Println("[GL21] Unknown shader compile error")
 			err = Error("Unknown shader compile error")
 		}
 		//chk(err)

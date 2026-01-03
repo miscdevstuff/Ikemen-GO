@@ -99,8 +99,11 @@ func (r *Renderer_GL32) compileShader(shaderType uint32, src string) (shader uin
 		if size > 0 {
 			str := make([]byte, size+1)
 			gl.GetShaderInfoLog(shader, size, &l, &str[0])
+			// NEW: Print actual error to Logcat
+			fmt.Printf("[GL32] SHADER COMPILE ERROR:\n%s\n", str[:l])
 			err = Error(str[:l])
 		} else {
+			fmt.Println("[GL32] Unknown shader compile error")
 			err = Error("Unknown shader compile error")
 		}
 		//chk(err)
