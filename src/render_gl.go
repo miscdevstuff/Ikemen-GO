@@ -86,7 +86,7 @@ func (s *ShaderProgram_GL21) RegisterTextures(names ...string) {
 
 func (r *Renderer_GL21) compileShader(shaderType uint32, src string) (shader uint32, err error) {
 	shader = gl.CreateShader(shaderType)
-	src = "#version 120\n" + src + "\x00""
+	src = "#version 120\n" + src + "\x00"
 
 	s, _ := gl.Strs(src)
 	var l int32 = int32(len(src) - 1)

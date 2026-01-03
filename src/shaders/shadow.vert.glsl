@@ -1,8 +1,5 @@
-/* Shadow Vertex Shader - Final Logic Fix + Syntax Correction */
-#ifdef GL_ES
-    precision highp float;
-    precision mediump int;
-#endif
+/* Shadow Vertex Shader - SAFE MODE (No VTF, Low Limits) */
+// No precision defined (Relies on gl4es auto-injection)
 
 #if __VERSION__ >= 450
     // --- MODERN GL (Keep as is) ---
@@ -12,7 +9,6 @@
     layout (constant_id = 1) const bool useJoint1 = false;
     layout (constant_id = 2) const bool useVertColor = false;
     
-    // Placeholder to make 'manual_transpose' valid in modern path
     mat4 manual_transpose(mat4 m) { return transpose(m); }
 
     struct Light {
@@ -71,6 +67,7 @@
     uniform vec4 morphTargetOffset;
     uniform int numVertices;
     
+    // SAFE MODE: Array matches modern but we wont use all indices
     uniform mat4 lightMatrices[24]; 
     uniform int lightIndex; 
 
@@ -94,7 +91,6 @@
     #define useJoint1 true
     #define useVertColor true
     
-    // KEEP THIS: Fixes "Redefined Function" Error
     mat4 manual_transpose(mat4 m) {
         return mat4(
             m[0][0], m[1][0], m[2][0], m[3][0],
@@ -108,33 +104,18 @@
 // Shared Logic
 #if __VERSION__ < 450
 mat4 getMatrixFromTexture(float index){
-    mat4 mat;
-    float nj = float(numJoints > 0 ? numJoints : 1); 
-    mat[0] = COMPAT_TEXTURE(jointMatrices,vec2(0.5/6.0,(index+0.5)/nj));
-    mat[1] = COMPAT_TEXTURE(jointMatrices,vec2(1.5/6.0,(index+0.5)/nj));
-    mat[2] = COMPAT_TEXTURE(jointMatrices,vec2(2.5/6.0,(index+0.5)/nj));
-    mat[3] = vec4(0.0,0.0,0.0,1.0);
-    // Use the manual function
-    return manual_transpose(mat);
+    // SAFE MODE: Disable Vertex Texture Fetch
+    // If your device doesn't support this, it causes "Unknown shader compile error"
+    return mat4(1.0); 
 }
 
 mat4 getJointMatrix(){
-    mat4 ret = mat4(0.0);
-    ret += weights_0.x*getMatrixFromTexture(joints_0.x);
-    ret += weights_0.y*getMatrixFromTexture(joints_0.y);
-    ret += weights_0.z*getMatrixFromTexture(joints_0.z);
-    ret += weights_0.w*getMatrixFromTexture(joints_0.w);
-    if(useJoint1){
-        ret += weights_1.x*getMatrixFromTexture(joints_1.x);
-        ret += weights_1.y*getMatrixFromTexture(joints_1.y);
-        ret += weights_1.z*getMatrixFromTexture(joints_1.z);
-        ret += weights_1.w*getMatrixFromTexture(joints_1.w);
-    }
-    if(abs(ret[0][0]) < 0.0001 && abs(ret[3][3]) < 0.0001) return mat4(1.0);
-    return ret;
+    // SAFE MODE: Return Identity (No Skinning)
+    return mat4(1.0);
 }
 
 float getMorphTargetWeight(int idx) {
+    // Keep this simple logic
     int vecIndex  = idx / 4;
     int compIndex = idx - vecIndex * 4;
     if (vecIndex == 0) {
@@ -164,7 +145,7 @@ void main() {
         vColorAlpha = useVertColor ? vertColor.a : 1.0;
         vec4 pos = vec4(position, 1.0);
 
-        // Morph Targets (Keep Loop Fix)
+        // Morph Targets (Keep logic)
         if (morphTargetOffset[0] > 0.0){
             for (int idx = 0; idx < 8; ++idx) {
                 if (idx < numTargets) {
@@ -181,12 +162,8 @@ void main() {
             }
         }
 
-        if (useJoint0){
-            mat4 jointMatrix = getJointMatrix();
-            FragPos = model * jointMatrix * pos;
-        } else {
-            FragPos = model * pos;
-        }
+        // Skinning disabled in SAFE MODE
+        FragPos = model * pos;
 
         vLightIndex = float(lightIndex);
         gl_Position = lightMatrices[lightIndex] * FragPos; 

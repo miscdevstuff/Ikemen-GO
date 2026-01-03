@@ -1,8 +1,5 @@
-/* Shadow Fragment Shader - Final Logic Fix + Syntax Correction */
-#ifdef GL_ES
-    precision highp float;
-    precision mediump int;
-#endif
+/* Shadow Fragment Shader - SAFE MODE */
+// No precision defined
 
 struct Light {
     vec3 direction; float range;
@@ -78,25 +75,13 @@ struct Light {
         vec3 lightPos = vec3(0.0);
         int type = LightType_Directional;
 
-        if (index == 0) {
-            lightMapFar = lights[0].shadowMapFar;
-            lightPos = lights[0].position;
-            type = lights[0].type;
-        } else if (index == 1) {
-            lightMapFar = lights[1].shadowMapFar;
-            lightPos = lights[1].position;
-            type = lights[1].type;
-        } else if (index == 2) {
-            lightMapFar = lights[2].shadowMapFar;
-            lightPos = lights[2].position;
-            type = lights[2].type;
-        } else {
-            lightMapFar = lights[3].shadowMapFar;
-            lightPos = lights[3].position;
-            type = lights[3].type;
+        // SAFE MODE: Basic access, no complex array logic if possible
+        if (index >= 0 && index < 4) {
+             lightMapFar = lights[index].shadowMapFar;
+             lightPos = lights[index].position;
+             type = lights[index].type;
         }
 
-        // KEEP THIS: Write depth to color (fixes GLES 2.0 crash)
         if (type != LightType_Directional) {
             float lightDistance = length(FragPos.xyz - lightPos);
             float normalizedDist = lightDistance / lightMapFar;
