@@ -198,4 +198,25 @@ class MainActivity : SDLActivity() {
     override fun getLibraries(): Array<String> {
         return arrayOf("ikemen")
     }
+
+    // Companion Object to Init GL4ES Debugging ---
+    companion object {
+        init {
+            try {
+                // 1. Enable gl4es debug logging (Prints Errors & Warnings)
+                Os.setenv("LIBGL_DEBUG", "1", true)
+
+                // 2. Print the CONVERTED shader source code
+                // This allows us to see exactly what the driver is rejecting
+                Os.setenv("LIBGL_LOGSHADER", "1", true)
+
+                // 3. Force GLES 2.0 backend
+                Os.setenv("LIBGL_ES", "2", true)
+                
+                Log.i("IkemenMainActivity", "GL4ES Environment Variables Set: DEBUG=1, LOGSHADER=1")
+            } catch (e: Exception) {
+                Log.e("IkemenMainActivity", "Failed to set GL4ES environment variables", e)
+            }
+        }
+    }
 }
