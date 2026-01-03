@@ -723,7 +723,12 @@ func systemScriptInit(l *lua.LState) {
 		if !nilArg(l, 2) {
 			str = strArg(l, 2)
 		}
-		fmt.Println(str, "*Anim:", a, "*Animation:", a.anim)
+		fmt.Printf("%s *Anim=%p %+v\n", str, a, *a)
+		if a.anim == nil {
+			fmt.Printf("%s *Animation=nil\n", str)
+		} else {
+			fmt.Printf("%s *Animation=%p %+v\n", str, a.anim, *a.anim)
+		}
 		return 0
 	})
 	luaRegister(l, "animDraw", func(*lua.LState) int {
@@ -1306,6 +1311,25 @@ func systemScriptInit(l *lua.LState) {
 				(&aSnap).Draw(layerLocal)
 			})
 		})
+		return 0
+	})
+	luaRegister(l, "bgDebug", func(*lua.LState) int {
+		bg, ok := toUserData(l, 1).(*BGDef)
+		if !ok {
+			userDataError(l, 1, bg)
+		}
+		str := ""
+		if !nilArg(l, 2) {
+			str = strArg(l, 2)
+		}
+		fmt.Printf("%s *BGDef=%p %+v\n", str, bg, *bg)
+		for i, v := range bg.bg {
+			if v == nil {
+				fmt.Printf("%s bg.bg[%d]=nil\n", str, i)
+				continue
+			}
+			fmt.Printf("%s bg.bg[%d]=%p %+v\n", str, i, v, *v)
+		}
 		return 0
 	})
 	luaRegister(l, "bgDraw", func(*lua.LState) int {
@@ -2163,7 +2187,9 @@ func systemScriptInit(l *lua.LState) {
 				sys.gameRunning = false
 				sys.clearSpriteData()
 				sys.luaDiscardDrawQueue()
+				//if !sys.skipMotifScaling() {
 				sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+				//}
 				l.Push(lua.LNumber(winp))
 				l.Push(lua.LNumber(sys.motif.ch.controllerNo + 1))
 				return 2
@@ -3456,7 +3482,7 @@ func systemScriptInit(l *lua.LState) {
 		if !nilArg(l, 2) {
 			str = strArg(l, 2)
 		}
-		fmt.Println(str, r)
+		fmt.Printf("%s *Rect=%p %+v\n", str, r, *r)
 		return 0
 	})
 	luaRegister(l, "rectDraw", func(*lua.LState) int {
@@ -4307,7 +4333,7 @@ func systemScriptInit(l *lua.LState) {
 		if !nilArg(l, 2) {
 			str = strArg(l, 2)
 		}
-		fmt.Println(str, ts)
+		fmt.Printf("%s *TextSprite=%p %+v\n", str, ts, *ts)
 		return 0
 	})
 	luaRegister(l, "textImgDraw", func(*lua.LState) int {

@@ -40,7 +40,6 @@ const (
 	audioFrequency       = 22050
 	audioPrecision       = 4
 	audioResampleQuality = 1
-	audioSoundFont       = "sound/soundfont.sf2" // default path for MIDI soundfont
 )
 
 // ------------------------------------------------------------------
@@ -599,7 +598,7 @@ func (bgm *Bgm) Open(filename string, loop, bgmVolume, bgmLoopStart, bgmLoopEnd,
 		bgm.streamer, format, err = flac.Decode(f)
 		bgm.format = "flac"
 	} else if HasExtension(bgm.filename, ".mid") || HasExtension(bgm.filename, ".midi") {
-		if sf, sferr := loadSoundFont(audioSoundFont); sferr != nil {
+		if sf, sferr := loadSoundFont(sys.cfg.Sound.SoundFont); sferr != nil {
 			err = sferr
 		} else {
 			bgm.streamer, format, err = midi.Decode(f, sf, beep.SampleRate(int(sys.cfg.Sound.SampleRate)))
@@ -704,7 +703,7 @@ func (bgm *Bgm) Open(filename string, loop, bgmVolume, bgmLoopStart, bgmLoopEnd,
 			case "flac":
 				dec, _, err = flac.Decode(lf)
 			case "midi":
-				sf, e := loadSoundFont(audioSoundFont)
+				sf, e := loadSoundFont(sys.cfg.Sound.SoundFont)
 				if e != nil {
 					sys.errLog.Println(e)
 					return

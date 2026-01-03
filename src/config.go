@@ -149,6 +149,7 @@ type Config struct {
 		ClipboardRows       int     `ini:"ClipboardRows"`
 		ConsoleRows         int     `ini:"ConsoleRows"`
 		ClsnDarken          bool    `ini:"ClsnDarken"`
+		DumpLuaTables       bool    `ini:"DumpLuaTables"`
 		Font                string  `ini:"Font"`
 		FontScale           float32 `ini:"FontScale"`
 		StartStage          string  `ini:"StartStage"`
@@ -180,6 +181,7 @@ type Config struct {
 	} `ini:"Video"`
 	Sound struct {
 		SampleRate        int32   `ini:"SampleRate"`
+		SoundFont         string  `ini:"SoundFont"`
 		BufferSize        int     `ini:"BufferSize"`
 		StereoEffects     bool    `ini:"StereoEffects"`
 		Normalizer        bool    `ini:"Normalizer"`
@@ -224,6 +226,7 @@ type Config struct {
 		SOCDResolution             int     `ini:"SOCDResolution"`
 		ControllerStickSensitivity float32 `ini:"ControllerStickSensitivity"`
 		XinputTriggerSensitivity   float32 `ini:"XinputTriggerSensitivity"`
+		AnalogDeadTime             int32   `ini:"AnalogDeadTime"`
 	} `ini:"Input"`
 	Keys     map[string]*KeysProperties `ini:"map:^(?i)Keys_P[0-9]+$" lua:"Keys"`
 	Joystick map[string]*KeysProperties `ini:"map:^(?i)Joystick_P[0-9]+$" lua:"Joystick"`

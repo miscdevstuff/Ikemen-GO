@@ -203,7 +203,6 @@ function main.f_btnPalNo(p)
 end
 
 --return bool based on command input
-local ANALOG_DEAD_TIME = 20 -- dead time to limit scrolling behavior
 main.playerInput = 1
 main.lastAxis = nil
 main.analogDeadTime = 0
@@ -228,7 +227,7 @@ function main.f_input(p, ...)
 							end
 							if key == btn and main.analogDeadTime == 0 and key ~= main.lastAxis then
 								main.playerInput = pn
-								main.analogDeadTime = ANALOG_DEAD_TIME
+								main.analogDeadTime = gameOption('Input.AnalogDeadTime')
 								main.lastAxis = key
 								return true
 							end
@@ -265,25 +264,6 @@ function main.f_restoreInput()
 		end
 	end
 end
-
---check if a file or directory exists in this path
-function main.f_exists(file)
-	local ok, err, code = os.rename(file, file)
-	if not ok then
-		if code == 13 or string.match(err, "file exists") then
-			--permission denied, but it exists
-			return true
-		end
-	end
-	return ok, err
-end
---check if a directory exists in this path
-function  main.f_isdir(path)
-	-- "/" works on both Unix and Windows
-	return main.f_exists(path .. '/')
-end
-
-main.debugLog = main.f_isdir('debug')
 
 --check if file exists
 function main.f_fileExists(file)
@@ -898,7 +878,7 @@ function main.f_commandLine()
 	selectStage(main.t_stageDef[stage:lower()])
 	setTeamMode(1, t_teamMode[1], t_numChars[1])
 	setTeamMode(2, t_teamMode[2], t_numChars[2])
-	if main.debugLog then main.f_printTable(t, 'debug/t_quickvs.txt') end
+	if gameOption('Debug.DumpLuaTables') then main.f_printTable(t, 'debug/t_quickvs.txt') end
 	local t_params = {}
 	--iterate over the table in -p order ascending
 	for _, v in main.f_sortKeys(t, function(t, a, b) return t[b].num > t[a].num end) do
@@ -976,7 +956,7 @@ end
 main.t_unlockLua = {chars = {}, stages = {}, modes = {}}
 
 motif = loadMotif()
-if main.debugLog then main.f_printTable(motif, "debug/loadMotif.txt") end
+if gameOption('Debug.DumpLuaTables') then main.f_printTable(motif, "debug/loadMotif.txt") end
 
 textImgSetText(motif.title_info.footer.version.TextSpriteData, version())
 
@@ -1011,14 +991,14 @@ function main.f_warning(text, sec, background, overlay, titleData, textData, can
 		clearColor(background.bgclearcolor[1], background.bgclearcolor[2], background.bgclearcolor[3])
 		--draw layerno = 0 backgrounds
 		bgDraw(background.BGDef, 0)
+		--draw layerno = 1 backgrounds
+		bgDraw(background.BGDef, 1)
 		--draw overlay
 		rectDraw(overlay)
 		--draw title
 		textImgDraw(titleData)
 		--draw text
 		textImgDraw(textData)
-		--draw layerno = 1 backgrounds
-		bgDraw(background.BGDef, 1)
 		--end loop
 		refresh()
 	end
@@ -1044,6 +1024,8 @@ function main.f_drawInput(textData, text, sec, background, overlay)
 		clearColor(background.bgclearcolor[1], background.bgclearcolor[2], background.bgclearcolor[3])
 		--draw layerno = 0 backgrounds
 		bgDraw(background.BGDef, 0)
+		--draw layerno = 1 backgrounds
+		bgDraw(background.BGDef, 1)
 		--draw overlay
 		rectDraw(overlay)
 		--draw text
@@ -1051,8 +1033,6 @@ function main.f_drawInput(textData, text, sec, background, overlay)
 		textImgSetText(textData, text)
 		textImgAddText(textData, '\\n\\n' .. input)
 		textImgDraw(textData)
-		--draw layerno = 1 backgrounds
-		bgDraw(background.BGDef, 1)
 		--end loop
 		main.f_cmdInput()
 		refresh()
@@ -1637,7 +1617,7 @@ function main.f_storyboard(path)
 	if s == nil then
 		return
 	end
-	if main.debugLog then
+	if gameOption('Debug.DumpLuaTables') then
 		-- get filename without extension from full path
 		local name = path:match("([^/\\]+)$") or "unknown" -- last path segment
 		name = name:gsub("%.[^%.]+$", "") -- strip last extension
@@ -2390,7 +2370,7 @@ main.t_itemname = {
 }
 main.t_itemname.teamarcade = main.t_itemname.arcade
 main.t_itemname.teamversus = main.t_itemname.versus
-if main.debugLog then main.f_printTable(main.t_itemname, 'debug/t_mainItemname.txt') end
+if gameOption('Debug.DumpLuaTables') then main.f_printTable(main.t_itemname, 'debug/t_mainItemname.txt') end
 
 function main.f_deleteIP(item, t)
 	if t[item].itemname:match('^ip_') then
@@ -2744,7 +2724,7 @@ function main.f_start()
 	--for _, v in pairs(motif[main.group].menu.item.active.bg) do
 	--	animSetWindow(v.AnimData, w[1], w[2], w[3], w[4])
 	--end
-	if main.debugLog then main.f_printTable(main.menu, 'debug/t_mainMenu.txt') end
+	if gameOption('Debug.DumpLuaTables') then main.f_printTable(main.menu, 'debug/t_mainMenu.txt') end
 end
 
 --replay menu
@@ -2807,6 +2787,8 @@ function main.f_connect(server, str)
 		clearColor(motif[main.background].bgclearcolor[1], motif[main.background].bgclearcolor[2], motif[main.background].bgclearcolor[3])
 		--draw layerno = 0 backgrounds
 		bgDraw(motif[main.background].BGDef, 0)
+		--draw layerno = 1 backgrounds
+		bgDraw(motif[main.background].BGDef, 1)
 		--draw overlay
 		rectDraw(motif.title_info.connecting.overlay.RectData)
 		--draw text
@@ -2819,8 +2801,6 @@ function main.f_connect(server, str)
 			textImgSetText(motif.title_info.connecting.join.TextSpriteData, string.format(motif.title_info.connecting.join.text, server, str))
 			textImgDraw(motif.title_info.connecting.join.TextSpriteData)
 		end
-		--draw layerno = 1 backgrounds
-		bgDraw(motif[main.background].BGDef, 1)
 		main.f_cmdInput()
 		refresh()
 	end
@@ -2931,6 +2911,8 @@ function main.f_attractStart()
 		counter = counter + 1
 		--draw layerno = 0 backgrounds
 		bgDraw(motif.attractbgdef.BGDef, 0)
+		--draw layerno = 1 backgrounds
+		bgDraw(motif.attractbgdef.BGDef, 1)
 		--draw text
 		if credits() ~= 0 then
 			if motif.attract_mode.start.press.blinktime > 0 and not fadeOutStarted then
@@ -2994,8 +2976,6 @@ function main.f_attractStart()
 			main.menu.f()
 			return false
 		end
-		--draw layerno = 1 backgrounds
-		bgDraw(motif.attractbgdef.BGDef, 1)
 		--draw fadein / fadeout
 		if not fadeOutStarted and not main.fadeActive and ((credits() ~= 0 and main.f_input(main.t_players, motif.attract_mode.start.press.key)) or (not timerActive and counter >= motif.attract_mode.start.time)) then
 			if credits() ~= 0 then
@@ -3316,9 +3296,13 @@ function main.f_menuCommonDraw(t, item, cursorPosY, moveTxt, sec, bg, skipClear,
 	if not skipClear then
 		clearColor(bg.bgclearcolor[1], bg.bgclearcolor[2], bg.bgclearcolor[3])
 	end
-
+	--draw layerno = 0 backgrounds
 	if not opts.skipBG0 then
 		bgDraw(bg.BGDef, 0)
+	end
+	--draw layerno = 1 backgrounds
+	if not opts.skipBG1 then
+		bgDraw(bg.BGDef, 1)
 	end
 
 	--draw menu box
@@ -3481,10 +3465,6 @@ function main.f_menuCommonDraw(t, item, cursorPosY, moveTxt, sec, bg, skipClear,
 		textImgSetText(motif.attract_mode.credits.TextSpriteData, string.format(motif.attract_mode.credits.text, credits()))
 		textImgDraw(motif.attract_mode.credits.TextSpriteData)
 	end
-	--draw layerno = 1 backgrounds
-	if not opts.skipBG1 then
-		bgDraw(bg.BGDef, 1)
-	end
 	--draw footer
 	if sec.footer ~= nil then
 		rectDraw(sec.footer.overlay.RectData)
@@ -3564,7 +3544,7 @@ main.f_unlock(false)
 --;===========================================================
 --; INITIALIZE LOOPS
 --;===========================================================
-if main.debugLog then
+if gameOption('Debug.DumpLuaTables') then
 	main.f_printTable(main.t_selChars, "debug/t_selChars.txt")
 	main.f_printTable(main.t_selStages, "debug/t_selStages.txt")
 	main.f_printTable(main.t_selOptions, "debug/t_selOptions.txt")
@@ -3601,4 +3581,4 @@ else
 end
 
 -- Debug Info
---if main.debugLog then main.f_printTable(main, "debug/t_main.txt") end
+--if gameOption('Debug.DumpLuaTables') then main.f_printTable(main, "debug/t_main.txt") end

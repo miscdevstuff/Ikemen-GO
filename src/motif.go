@@ -254,7 +254,7 @@ type BoxCursorProperties struct {
 type OverlayProperties struct {
 	Col        [3]int32 `ini:"col"`
 	Alpha      [2]int32 `ini:"alpha" default:"0,255"`
-	Layerno    int16    `ini:"layerno" default:"0"`
+	Layerno    int16    `ini:"layerno" default:"1"`
 	Window     [4]int32 `ini:"window"`
 	Localcoord [2]int32 `ini:"localcoord"`
 	RectData   *Rect
@@ -2871,7 +2871,7 @@ func (m *Motif) drawAspectBars() {
 
 func (m *Motif) draw(layerno int16) {
 	// Draw black bars if fight aspect and motif aspect differ.
-	if layerno == 1 && (!sys.middleOfMatch() || m.me.active || m.di.active) {
+	if layerno == 1 && (!sys.middleOfMatch() || m.me.active || m.di.active) && !sys.skipMotifScaling() {
 		m.drawAspectBars()
 	}
 	if m.ch.active {
@@ -3068,18 +3068,21 @@ func (mo *Motif) sprintf(format string, args ...interface{}) string {
 }
 
 type MotifMenu struct {
-	enabled     bool
-	active      bool
-	initialized bool
-	counter     int32
-	endTimer    int32
+	enabled        bool
+	active         bool
+	initialized    bool
+	counter        int32
+	endTimer       int32
+	closeRequested bool
+	reopenLock     bool
 }
 
 func (me *MotifMenu) reset(m *Motif) {
 	me.active = false
 	me.initialized = false
 	me.endTimer = -1
-	if !m.di.active {
+	me.closeRequested = false
+	if !m.di.active && !sys.skipMotifScaling() {
 		sys.applyFightAspect()
 	}
 	if err := sys.luaLState.DoString("menuReset()"); err != nil {
@@ -3087,15 +3090,48 @@ func (me *MotifMenu) reset(m *Motif) {
 	}
 }
 
+// returns true if the pause/menu open input is still physically held.
+func (me *MotifMenu) menuOpenInputHeld(m *Motif) bool {
+	// Physical ESC hold
+	if sys.keyState != nil && sys.keyState[KeyEscape] {
+		return true
+	}
+	// Also respect configured menu cancel/open bindings
+	if m != nil && m.MenuInfo.Enabled {
+		if m.button(m.MenuInfo.Menu.Cancel.Key, -1) {
+			return true
+		}
+	}
+	return false
+}
+
+func (me *MotifMenu) requestClose(m *Motif) {
+	if me.endTimer != -1 {
+		return
+	}
+	me.closeRequested = true
+	startFadeOut(m.MenuInfo.FadeOut.FadeData, m.fadeOut, false, m.fadePolicy)
+	me.endTimer = me.counter + m.fadeOut.timeRemaining
+}
+
 func (me *MotifMenu) init(m *Motif) {
 	if !m.MenuInfo.Enabled || !me.enabled {
 		me.initialized = true
 		return
 	}
+	// Don't allow the menu to instantly re-open if the open/cancel key is still held after closing.
+	if me.reopenLock {
+		if me.menuOpenInputHeld(m) {
+			return
+		}
+		me.reopenLock = false
+	}
 	if (!sys.esc && !m.button(m.MenuInfo.Menu.Cancel.Key, -1)) || m.ch.active || sys.postMatchFlg {
 		return
 	}
-	sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	if !sys.skipMotifScaling() {
+		sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	}
 
 	if err := sys.luaLState.DoString("menuInit()"); err != nil {
 		sys.luaLState.RaiseError("Error executing Lua code: %v\n", err.Error())
@@ -3105,12 +3141,14 @@ func (me *MotifMenu) init(m *Motif) {
 	me.counter = 0
 	me.active = true
 	me.initialized = true
+	me.closeRequested = false
+	me.endTimer = -1
 }
 
 func (me *MotifMenu) step(m *Motif) {
-	if me.endTimer == -1 && (sys.keyInput == KeyUnknown || sys.endMatch) {
-		startFadeOut(m.MenuInfo.FadeOut.FadeData, m.fadeOut, false, m.fadePolicy)
-		me.endTimer = me.counter + m.fadeOut.timeRemaining
+	// Close only when requested by Lua (menuRun() returned false) or when ending the match.
+	if me.endTimer == -1 && (me.closeRequested || sys.endMatch) {
+		me.requestClose(m)
 	}
 
 	// Check if the sequence has ended
@@ -3119,6 +3157,8 @@ func (me *MotifMenu) step(m *Motif) {
 			m.fadeOut.reset()
 		}
 		me.active = false
+		me.closeRequested = false
+		me.reopenLock = true
 		me.reset(m)
 		sys.paused = false
 		return
@@ -3130,13 +3170,15 @@ func (me *MotifMenu) step(m *Motif) {
 
 func (me *MotifMenu) draw(m *Motif, layerno int16) {
 	if layerno == 2 {
-		//if ok, err := ExecFunc(sys.luaLState, "menuRun"); err != nil {
-		//	sys.luaLState.RaiseError("Error executing Lua function: %v\n", err.Error())
-		//} else if !ok {
-		//	me.reset(m)
-		//}
-		if err := sys.luaLState.DoString("menuRun()"); err != nil {
+		// Once closing has started, stop running the Lua menu loop so it can't keep drawing/flickering.
+		if me.endTimer != -1 {
+			return
+		}
+		if ok, err := ExecFunc(sys.luaLState, "menuRun"); err != nil {
 			sys.luaLState.RaiseError("Error executing Lua code: %v\n", err.Error())
+		} else if !ok {
+			// Lua requested to close the pause menu (menuRun returns main.pauseMenu).
+			me.requestClose(m)
 		}
 	}
 }
@@ -3156,7 +3198,9 @@ func (ch *MotifChallenger) reset(m *Motif) {
 	ch.initialized = false
 	ch.endTimer = -1
 	ch.controllerNo = -1
-	//sys.applyFightAspect()
+	//if !sys.skipMotifScaling() {
+	//	sys.applyFightAspect()
+	//}
 }
 
 func (ch *MotifChallenger) init(m *Motif) {
@@ -3170,7 +3214,9 @@ func (ch *MotifChallenger) init(m *Motif) {
 		return
 	}
 	ch.controllerNo = controllerNo
-	//sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	//if !sys.skipMotifScaling() {
+	//	sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	//}
 
 	if m.AttractMode.Enabled && sys.credits > 0 {
 		sys.credits--
@@ -3229,14 +3275,18 @@ func (ch *MotifChallenger) step(m *Motif) {
 }
 
 func (ch *MotifChallenger) draw(m *Motif, layerno int16) {
-	m.ChallengerInfo.Overlay.RectData.Draw(layerno)
+	// Background
 	if m.ChallengerBgDef.BgClearColor[0] >= 0 {
 		m.ChallengerBgDef.RectData.Draw(layerno)
 	}
 	m.ChallengerBgDef.BGDef.Draw(int32(layerno), 0, 0, 1)
+	// Overlay
+	m.ChallengerInfo.Overlay.RectData.Draw(layerno)
+	// Text
 	if ch.counter >= m.ChallengerInfo.Text.Displaytime {
 		m.ChallengerInfo.Text.TextSpriteData.Draw(layerno)
 	}
+	// Bg
 	if ch.counter >= m.ChallengerInfo.Bg.Displaytime {
 		m.ChallengerInfo.Bg.AnimData.Draw(layerno)
 	}
@@ -3264,7 +3314,9 @@ func (co *MotifContinue) reset(m *Motif) {
 	co.selected = false
 	co.endTimer = -1
 	co.showEndAnim = false
-	sys.applyFightAspect()
+	if !sys.skipMotifScaling() {
+		sys.applyFightAspect()
+	}
 }
 
 func (co *MotifContinue) extractAndSortKeysDescending(m *Motif) []string {
@@ -3289,7 +3341,9 @@ func (co *MotifContinue) init(m *Motif) {
 		co.initialized = true
 		return
 	}
-	sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	if !sys.skipMotifScaling() {
+		sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	}
 	co.pn = 1 // TODO: Initialize pn appropriately
 
 	// Extract and sort keys in descending order
@@ -3860,7 +3914,9 @@ func (di *MotifDialogue) reset(m *Motif) {
 		}
 	}
 
-	//sys.applyFightAspect()
+	//if !sys.skipMotifScaling() {
+	//	sys.applyFightAspect()
+	//}
 }
 
 func (di *MotifDialogue) clear(m *Motif) {
@@ -3880,7 +3936,9 @@ func (di *MotifDialogue) clear(m *Motif) {
 	if m.DialogueInfo.P2.Face.Active.AnimData != nil {
 		m.DialogueInfo.P2.Face.Active.AnimData.anim = nil
 	}
-	sys.applyFightAspect()
+	if !sys.skipMotifScaling() {
+		sys.applyFightAspect()
+	}
 }
 
 func (di *MotifDialogue) initDefaults(m *Motif) {
@@ -3971,7 +4029,9 @@ func (di *MotifDialogue) init(m *Motif) {
 	}
 
 	di.reset(m)
-	sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	if !sys.skipMotifScaling() {
+		sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	}
 
 	lines, pn, _ := di.getDialogueLines()
 	di.char = sys.chars[pn-1][0]
@@ -4808,7 +4868,7 @@ func (hi *MotifHiscore) init(m *Motif, mode string, place, endTime int32, noFade
 				x := baseX + itemOffX + m.HiscoreInfo.Item.Rank.Offset[0] +
 					float32(i)*(m.HiscoreInfo.Item.Spacing[0]+m.HiscoreInfo.Item.Rank.Spacing[0])
 				stepY := float32(math.Round(float64(
-					(float32(ts.fnt.Size[1])+float32(ts.fnt.Spacing[1]))*ts.yscl +
+					(float32(ts.fnt.Size[1])+float32(ts.fnt.Spacing[1]))*ts.scaleInit[1] +
 						(m.HiscoreInfo.Item.Spacing[1] + m.HiscoreInfo.Item.Rank.Spacing[1]),
 				)))
 				y := baseY + itemOffY + m.HiscoreInfo.Item.Rank.Offset[1] + stepY*float32(i)
@@ -4841,7 +4901,7 @@ func (hi *MotifHiscore) init(m *Motif, mode string, place, endTime int32, noFade
 				x := baseX + itemOffX + m.HiscoreInfo.Item.Result.Offset[0] +
 					float32(i)*(m.HiscoreInfo.Item.Spacing[0]+m.HiscoreInfo.Item.Result.Spacing[0])
 				stepY := float32(math.Round(float64(
-					(float32(ts.fnt.Size[1])+float32(ts.fnt.Spacing[1]))*ts.yscl +
+					(float32(ts.fnt.Size[1])+float32(ts.fnt.Spacing[1]))*ts.scaleInit[1] +
 						(m.HiscoreInfo.Item.Spacing[1] + m.HiscoreInfo.Item.Result.Spacing[1]),
 				)))
 				y := baseY + itemOffY + m.HiscoreInfo.Item.Result.Offset[1] + stepY*float32(i)
@@ -4881,7 +4941,7 @@ func (hi *MotifHiscore) init(m *Motif, mode string, place, endTime int32, noFade
 				x := baseX + itemOffX + m.HiscoreInfo.Item.Name.Offset[0] +
 					float32(i)*(m.HiscoreInfo.Item.Spacing[0]+m.HiscoreInfo.Item.Name.Spacing[0])
 				stepY := float32(math.Round(float64(
-					(float32(ts.fnt.Size[1])+float32(ts.fnt.Spacing[1]))*ts.yscl +
+					(float32(ts.fnt.Size[1])+float32(ts.fnt.Spacing[1]))*ts.scaleInit[1] +
 						(m.HiscoreInfo.Item.Spacing[1] + m.HiscoreInfo.Item.Name.Spacing[1]),
 				)))
 				y := baseY + itemOffY + m.HiscoreInfo.Item.Name.Offset[1] + stepY*float32(i)
@@ -5101,6 +5161,10 @@ func (hi *MotifHiscore) draw(m *Motif, layerno int16) {
 		}
 		m.HiscoreBgDef.BGDef.Draw(int32(layerno), 0, 0, 1)
 	}
+	// Overlay
+	if !hi.noOverlay {
+		m.HiscoreInfo.Overlay.RectData.Draw(layerno)
+	}
 	// Title and subtitles
 	m.HiscoreInfo.Title.TextSpriteData.Draw(layerno)
 	m.HiscoreInfo.Title.Rank.TextSpriteData.Draw(layerno)
@@ -5154,11 +5218,6 @@ func (hi *MotifHiscore) draw(m *Motif, layerno int16) {
 	// Timer (only when enabled & during input)
 	if m.HiscoreInfo.Timer.Count != -1 && hi.input && m.HiscoreInfo.Timer.TextSpriteData != nil {
 		m.HiscoreInfo.Timer.TextSpriteData.Draw(layerno)
-	}
-
-	// Overlay
-	if !hi.noOverlay {
-		m.HiscoreInfo.Overlay.RectData.Draw(layerno)
 	}
 }
 
@@ -5426,7 +5485,9 @@ func (vi *MotifVictory) reset(m *Motif) {
 	m.VictoryScreen.WinQuote.TextSpriteData.textDelay = 0
 	vi.endTimer = -1
 	vi.clear(m)
-	sys.applyFightAspect()
+	if !sys.skipMotifScaling() {
+		sys.applyFightAspect()
+	}
 }
 
 func (vi *MotifVictory) clearProps(props *PlayerVictoryProperties) {
@@ -5692,7 +5753,9 @@ func (vi *MotifVictory) init(m *Motif) {
 		}
 	}
 
-	sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	if !sys.skipMotifScaling() {
+		sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	}
 
 	//fmt.Printf("[Victory] init: enabled=%v winnerTeam=%d cpu.enabled=%v p1.num=%d p2.num=%d\n", m.VictoryScreen.Enabled, sys.winnerTeam(), m.VictoryScreen.Cpu.Enabled, m.VictoryScreen.P1.Num, m.VictoryScreen.P2.Num)
 
@@ -5857,23 +5920,19 @@ func (vi *MotifVictory) draw(m *Motif, layerno int16) {
 	})
 	// Overlay
 	m.VictoryScreen.Overlay.RectData.Draw(layerno)
-
 	// Background
 	if m.VictoryBgDef.BgClearColor[0] >= 0 {
 		m.VictoryBgDef.RectData.Draw(layerno)
 	}
 	m.VictoryBgDef.BGDef.Draw(int32(layerno), 0, 0, 1)
-
 	// Face2 portraits
 	for _, s := range slots {
 		s.p.Face2.AnimData.Draw(layerno)
 	}
-
 	// Face portraits
 	for _, s := range slots {
 		s.p.AnimData.Draw(layerno)
 	}
-
 	// Name
 	m.VictoryScreen.P1.Name.TextSpriteData.Draw(layerno)
 	m.VictoryScreen.P2.Name.TextSpriteData.Draw(layerno)
@@ -5883,10 +5942,6 @@ func (vi *MotifVictory) draw(m *Motif, layerno int16) {
 	m.VictoryScreen.P6.Name.TextSpriteData.Draw(layerno)
 	m.VictoryScreen.P7.Name.TextSpriteData.Draw(layerno)
 	m.VictoryScreen.P8.Name.TextSpriteData.Draw(layerno)
-	//for _, s := range slots {
-	//	s.p.Name.TextSpriteData.Draw(layerno)
-	//}
-
 	// Winner Name
 	m.VictoryScreen.WinName.TextSpriteData.Draw(layerno)
 	// Winquote
@@ -6086,7 +6141,9 @@ func (wi *MotifWin) assignStates(p1, p1Teammate, p2, p2Teammate []int32) {
 	wi.p1TeammateState = p1Teammate
 	wi.p2State = p2
 	wi.p2TeammateState = p2Teammate
-	sys.applyFightAspect()
+	if !sys.skipMotifScaling() {
+		sys.applyFightAspect()
+	}
 }
 
 func (wi *MotifWin) reset(m *Motif) {
@@ -6123,7 +6180,9 @@ func (wi *MotifWin) init(m *Motif) {
 		wi.initialized = true
 		return
 	}
-	sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	if !sys.skipMotifScaling() {
+		sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
+	}
 
 	if !wi.soundsEnabled {
 		sys.clearAllSound()
@@ -6304,7 +6363,7 @@ func (wi *MotifWin) draw(m *Motif, layerno int16) {
 	if wi.resultsScreen != nil {
 		bg := wi.resultsBgDef
 		rs := wi.resultsScreen
-
+		// Background
 		if bg != nil {
 			if bg.BgClearColor[0] >= 0 && bg.RectData != nil {
 				bg.RectData.Draw(layerno)
@@ -6313,22 +6372,26 @@ func (wi *MotifWin) draw(m *Motif, layerno int16) {
 				bg.BGDef.Draw(int32(layerno), 0, 0, 1)
 			}
 		}
+		// Overlay
 		if rs.Overlay.RectData != nil {
 			rs.Overlay.RectData.Draw(layerno)
 		}
+		// Text
 		if wi.counter >= rs.WinsText.DisplayTime && rs.WinsText.TextSpriteData != nil {
 			rs.WinsText.TextSpriteData.Draw(layerno)
 		}
 		return
 	}
-
 	// Fallback: normal win screen.
 	{
+		// Background
 		if m.WinBgDef.BgClearColor[0] >= 0 {
 			m.WinBgDef.RectData.Draw(layerno)
 		}
 		m.WinBgDef.BGDef.Draw(int32(layerno), 0, 0, 1)
+		// Overlay
 		m.WinScreen.Overlay.RectData.Draw(layerno)
+		// Text
 		if wi.counter >= m.WinScreen.WinText.DisplayTime {
 			m.WinScreen.WinText.TextSpriteData.Draw(layerno)
 		}
