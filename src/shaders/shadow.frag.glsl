@@ -1,5 +1,4 @@
-/* Shadow Fragment Shader - Android/GLES 2.0 Strict Fix */
-
+/* Shadow Fragment Shader - Final Logic Fix + Syntax Correction */
 #ifdef GL_ES
     precision highp float;
     precision mediump int;
@@ -33,7 +32,6 @@ struct Light {
     layout(location = 2) in vec2 texcoord0;
     layout(location = 3) in flat int lightIndex;
     
-    // Modern Main
     void main() {
         vec4 color = baseColorFactor;
         if (useTexture) color *= COMPAT_TEXTURE(tex, vec2(texTransform * vec3(texcoord0, 1.0)));
@@ -74,11 +72,8 @@ struct Light {
             discard;
         }
 
-        // 1. Convert index safely
-        // We use a small epsilon to ensure rounding is correct
-        int index = int(vLightIndex + 0.1);
+        int index = int(vLightIndex + 0.5);
         
-        // 2. Manual Array Access (Required for GLES 2.0 Fragment Shaders)
         float lightMapFar = 100.0;
         vec3 lightPos = vec3(0.0);
         int type = LightType_Directional;
@@ -101,16 +96,12 @@ struct Light {
             type = lights[3].type;
         }
 
-        // 3. Write Depth to Color
+        // KEEP THIS: Write depth to color (fixes GLES 2.0 crash)
         if (type != LightType_Directional) {
             float lightDistance = length(FragPos.xyz - lightPos);
             float normalizedDist = lightDistance / lightMapFar;
-            
-            // Output linear depth to RGBA
-            // Using 1.0 in alpha ensures it's opaque
             gl_FragColor = vec4(normalizedDist, 0.0, 0.0, 1.0);
         } else {
-            // Directional lights use Z-buffer depth
             gl_FragColor = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0); 
         }
     }
